@@ -29,9 +29,9 @@
                                (values (- 255 r) g b a))))))))))
     (write-png-file "testinv.png" img)))
 
-(defun range (max)
-  (declare (fixnum max))
-  (loop for i below max collecting i))
+(defun range (min max)
+  (declare (fixnum min max))
+  (loop for i from min below max collecting i))
 
 (defstruct v
   (x 0 :type fixnum)
@@ -119,18 +119,15 @@
     (loop for i below (length (v-sum-color v)) do
          (setf (aref (v-average-color v) i) (floor (aref (v-sum-color v) i) (if (= 0 len) 1 len))))))
 
-(defun voronoi-bucket (v-arr img)
-  (declare (type 8-bit-rgb-image img) ((vector v) v-arr))
-  (let ((arr (make-picture-array img))
-        (kd-tree (make-kd-tree v-arr)))
-    (with-image-bounds (height width) img
-      (pmapc (lambda (i)
-               (loop for j below width 
-                  do 
-                    (let ((mini (nearest-voronoi j i kd-tree)))
-                      (setf (aref arr i j) mini))))
-             (range height)))
-    arr))
+(defun voronoi-bucket (arr v-arr minx maxx miny maxy)
+  (declare ((vector v) v-arr))
+  (let ((kd-tree (make-kd-tree v-arr)))
+    (pmapc (lambda (i)
+             (loop for j from minx below maxx 
+                do 
+                  (let ((mini (nearest-voronoi j i kd-tree)))
+                    (setf (aref arr i j) mini))))
+           (range miny maxy))))
 
 
 (defun voronoi-stat-collect (arr v-arr img)
@@ -210,7 +207,8 @@
                                      :y (first point)) voro))))
 (defun split-lowest-cell (voro)
   (let ((v (nth-value 1 (find-worst-cell voro))))
-    (split-cell voro v)))
+    (split-cell voro v)
+    v))
 
 (defun optimize-voros (voro)
   (let ((new-arr (make-array 0 :element-type 'v :adjustable t :fill-pointer t)))
@@ -232,27 +230,53 @@
          (setf (aref voro i) (make-v :x (v-x v)
                                      :y (v-y v))))))
 
+(defun minimum (seq)
+  (reduce #'min seq))
+
+(defun maximum (seq)
+  (reduce #'max seq))
+
+(defun get-v-bounds (v)
+  (let* ((points (v-points v))
+         (xs (map 'list #'second points))
+         (ys (map 'list #'first points))
+         (mpi (min-index (lambda (p) (- (+ (square (- (v-x v) (second p)))
+                                           (square (- (v-y v) (first p)))))) points))
+         (mp (aref points mpi))
+         (d (isqrt (+ (square (- (v-x v) (second mp)))
+                      (square (- (v-y v) (first mp)))))))
+    (values (- (minimum xs) d) (+ (maximum xs) d)
+            (- (minimum ys) d) (+ (maximum ys) d))))
+
 (defparameter *num-additions* 5)
 
 (defun optimize-loop (voro img max)
   (let ((voro voro)
-        arr)
-    (loop for i below max do
-         (progn
-           (format t "~a~a%        " #\return (/ (floor (* 10000 (/ i (* max 1.0)))) 100.0))
-           (finish-output)
-           (reset-voros voro)
-           (setf arr (voronoi-bucket voro img))
-           (voronoi-stat-collect arr voro img)
-           (setf voro (optimize-voros voro))
-           (fix-averages voro)
-           (calc-errors voro img)
-           (split-lowest-cell voro)))
-    (let ((ar (voronoi-bucket voro img)))
-      (voronoi-stat-collect ar voro img)
+        (arr (make-picture-array img)))
+    (with-image-bounds (height width) img
+      (let ((minx 0) (maxx width)
+            (miny 0) (maxy height))
+        (loop for i below max do
+             (progn
+               (format t "~a~a%        " #\return (/ (floor (* 10000 (/ i (* max 1.0)))) 100.0))
+               (finish-output)
+               (reset-voros voro)
+               (voronoi-bucket arr voro minx maxx miny maxy)
+               (voronoi-stat-collect arr voro img)
+               (setf voro (optimize-voros voro))
+               (fix-averages voro)
+               (calc-errors voro img)
+               (multiple-value-bind (nminx nmaxx nminy nmaxy)
+                   (get-v-bounds (split-lowest-cell voro))
+                 (setf minx (max 0 nminx))
+                 (setf maxx (min width nmaxx))
+                 (setf miny (max 0 nminy))
+                 (setf maxy (min height nmaxy))))))
+      (voronoi-bucket arr voro 0 width 0 height)
+      (voronoi-stat-collect arr voro img)
       (fix-averages voro)
       (format t "~a100%        ~%" #\return)
-      (values ar voro))))
+      (values arr voro))))
 
 (defun rgb-hsv (r g b)
   (let* ((min (* (/ 255.0) (min r g b)))
@@ -423,13 +447,18 @@
 (defun open-image (file)
   (image-convert (read-image-file file)))
 
+(defun runner (in-file out-file iterations)
+  (progn
+    (setf lparallel:*kernel* (lparallel:make-kernel 8))
+    (let* ((img (open-image in-file))
+           (voro (initialize-voronoi-points img)))
+      (multiple-value-bind (ar nvoro) (optimize-loop voro img iterations)
+        (let ((out-img (make-picture ar nvoro img)))
+          (write-image-file out-file out-img))))))
+
 (defun -main (&optional args)
   (if (not (= (length args) 4))
       (format t "Usage: ~a <input-file> <output-file> <number-of-iterations> ~%" (and args (first args)))
-      (progn
-        (setf lparallel:*kernel* (lparallel:make-kernel 8))
-        (let* ((img (open-image (pathname (second args))))
-               (voro (initialize-voronoi-points img)))
-          (multiple-value-bind (ar nvoro) (optimize-loop voro img (parse-integer (fourth args)))
-            (let ((out-img (make-picture ar nvoro img)))
-              (write-image-file (pathname (third args)) out-img)))))))
+      (runner (pathname (second args))
+              (pathname  (third args))
+              (parse-integer (fourth args)))))
