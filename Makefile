@@ -7,7 +7,7 @@ ENTRY=-main
 $(OUT): buildapp *.lisp quicklisp-manifest.txt
 	./buildapp  --manifest-file quicklisp-manifest.txt \
 				--load-system asdf \
-                --dynamic-space-size 2048 \
+                --dynamic-space-size 4096 \
 				--eval '(push "$(ROOT_DIR)/" asdf:*central-registry*)' \
 				--load-system $(PACKAGE) \
 				--eval '($(PACKAGEUTILS)::internal-disable-debugger)' \

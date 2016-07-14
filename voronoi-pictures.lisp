@@ -46,7 +46,7 @@
 (defun make-picture-array (img)
   (with-image-bounds (height width)
       img
-    (make-array (list height width) :element-type 'fixnum)))
+    (make-array (list height width) :element-type 'fixnum )))
 
 (defun in-bound-point (x min max)
   (if (< x min)
@@ -136,9 +136,14 @@
     (loop for i below height
        do (loop for j below width 
              do 
-               (let ((mini (aref arr i j)))
-                 (vector-push-extend (list i j) (v-points (aref v-arr mini)))
-                 (sum-colors (v-sum-color (aref v-arr mini)) (multiple-value-list (pixel img i j))))))))
+               (let* ((mini (aref arr i j))
+                      (vp (aref v-arr mini)))
+                 (if (not (equal vp 0))
+                     (progn
+                       (vector-push-extend (list i j) (v-points vp))
+                       (sum-colors (v-sum-color vp) (multiple-value-list (pixel img i j))))
+                     (progn
+                       (format t "ERROR: ~a~%" mini))))))))
 
 (defun image-convert (img)
   (with-image-bounds (height width) img
@@ -211,17 +216,7 @@
     v))
 
 (defun optimize-voros (voro)
-  (let ((new-arr (make-array 0 :element-type 'v :adjustable t :fill-pointer t)))
-    (loop for i below (length voro) do
-         (let ((v (aref voro i)))
-           (when (> (length (v-points v)) 0)
-             (vector-push-extend (make-v :x (v-x v)
-                                         :y (v-y v)
-                                         :sse (v-sse v)
-                                         :average-color (v-average-color v)
-                                         :sum-color (v-sum-color v)
-                                         :points (v-points v)) new-arr))))
-    new-arr))
+  voro)
 
 (defun reset-voros (voro)
   (declare ((vector v) voro))
@@ -243,8 +238,8 @@
          (mpi (min-index (lambda (p) (- (+ (square (- (v-x v) (second p)))
                                            (square (- (v-y v) (first p)))))) points))
          (mp (aref points mpi))
-         (d (isqrt (+ (square (- (v-x v) (second mp)))
-                      (square (- (v-y v) (first mp)))))))
+         (d (ceiling (isqrt (+ (square (- (v-x v) (second mp)))
+                               (square (- (v-y v) (first mp))))) 2)))
     (values (- (minimum xs) d) (+ (maximum xs) d)
             (- (minimum ys) d) (+ (maximum ys) d))))
 
