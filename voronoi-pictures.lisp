@@ -231,10 +231,10 @@
                                      :y (v-y v))))))
 
 (defun minimum (seq)
-  (reduce #'min seq))
+  (reduce #'min seq :initial-value (elt seq 0)))
 
 (defun maximum (seq)
-  (reduce #'max seq))
+  (reduce #'max seq :initial-value (elt seq 0)))
 
 (defun get-v-bounds (v)
   (let* ((points (v-points v))
