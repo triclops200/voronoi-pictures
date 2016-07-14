@@ -208,8 +208,10 @@
 (defun split-cell (voro v)
   (loop for i below *num-additions* do
        (let ((point (aref (v-points v) (random (length (v-points v))))))
-         (vector-push-extend (make-v :x (second point)
-                                     :y (first point)) voro))))
+         (unless (and (= (v-x v) (second point))
+                      (= (v-y v) (first point)))
+           (vector-push-extend (make-v :x (second point)
+                                       :y (first point)) voro)))))
 (defun split-lowest-cell (voro)
   (let ((v (nth-value 1 (find-worst-cell voro))))
     (split-cell voro v)
@@ -402,8 +404,8 @@
 
 (defun dist (x y point)
   (declare (fixnum x y) ((simple-array fixnum (3)) point))
-  (the float (sqrt (+ (the (signed-byte 32) (square (the (signed-byte 32) (- x (aref point 0)))))
-                      (the (signed-byte 32) (square (the (signed-byte 32) (- y (aref point 1)))))))))
+  (the single-float (sqrt (+ (the (signed-byte 32) (square (the (signed-byte 32) (- x (aref point 0)))))
+                             (the (signed-byte 32) (square (the (signed-byte 32) (- y (aref point 1)))))))))
 
 (defun nearest-neighbor-helper (kd-tree x y axis nearest nearest-dist)
   (declare (fixnum x y))
