@@ -103,15 +103,11 @@
   (declare (fixnum x y))
   (aref (the (simple-array fixnum (3)) (nearest-neighbor kd-tree x y)) 2))
 
-(defun old-nearest-voronoi (x y v-arr)
-  (declare (fixnum x y))
-  (min-index (lambda (v) (+ (square (- x (v-x v))) (square (- y (v-y v)))))
-             v-arr))
-
-(defun sum-colors (sum col)
-  (declare (vector sum))
-  (loop for i below (length sum) do
-       (incf (aref sum i) (elt col i))))
+(defun sum-colors (sum r g b)
+  (declare ((simple-array fixnum (3)) sum) ((unsigned-byte 8) r g b))
+  (incf (aref sum 0) r)
+  (incf (aref sum 1) g)
+  (incf (aref sum 2) b))
 
 (defun average-color (v)
   (declare (type v v))
@@ -141,7 +137,8 @@
                (let* ((mini (aref arr i j))
                       (vp (aref v-arr mini)))
                  (vector-push-extend (list i j) (v-points vp))
-                 (sum-colors (v-sum-color vp) (multiple-value-list (pixel img i j))))))))
+                 (multiple-value-bind (r g b) (pixel img i j)
+                   (sum-colors (v-sum-color vp) r g b)))))))
 
 (defun image-convert (img)
   (with-image-bounds (height width) img
@@ -186,6 +183,7 @@
 
 
 (defun calc-error (v img)
+  (declare (8-bit-rgb-image img))
   (loop for point across (v-points v) do
        (multiple-value-bind (r g b) (pixel img (first point) (second point))
          (inc-err-channel v 0 r)
@@ -224,21 +222,24 @@
          (setf (aref voro i) (make-v :x (v-x v)
                                      :y (v-y v))))))
 
-(defun minimum (seq)
-  (reduce #'min seq :initial-value (elt seq 0)))
+(defun minimum (seq) 
+  (the fixnum (reduce #'min seq :initial-value (elt seq 0))))
 
 (defun maximum (seq)
-  (reduce #'max seq :initial-value (elt seq 0)))
+  (the fixnum (reduce #'max seq :initial-value (elt seq 0))))
 
 (defun get-v-bounds (v)
   (let* ((points (v-points v))
          (xs (map 'list #'second points))
          (ys (map 'list #'first points))
-         (mpi (min-index (lambda (p) (- (+ (square (- (v-x v) (second p)))
-                                           (square (- (v-y v) (first p)))))) points))
+         (mpi (min-index (lambda (p) (the fixnum
+                                          (- (+ (square (the (signed-byte 32) (- (v-x v) (the fixnum (second p)))))
+                                                (square (the (signed-byte 32) (- (v-y v) (the fixnum (first p))))))))) points))
          (mp (aref points mpi))
-         (d (ceiling (isqrt (+ (square (- (v-x v) (second mp)))
-                               (square (- (v-y v) (first mp))))) 2)))
+         (d (ceiling (isqrt (the (signed-byte 32)
+                                 (+ (square (the (signed-byte 32) (- (v-x v) (the fixnum (second mp)))))
+                                    (square (the (signed-byte 32) (- (v-y v) (the fixnum (first mp)))))))) 2)))
+    (declare (fixnum d))
     (values (- (minimum xs) d) (+ (maximum xs) d)
             (- (minimum ys) d) (+ (maximum ys) d))))
 
@@ -340,7 +341,7 @@
 
 
 
-(defun voro-to-kd-points (voro)
+(defun voro-to-kd-points (voro) 
   (loop for i below (length voro) collecting
        (let ((v (aref voro i)))
          (make-array '(3)
@@ -355,13 +356,14 @@
     (values x-a y-a)))
 
 (defun make-set (list)
-  (let ((set (make-hash-table :test 'equal)))
+  (let ((set (make-hash-table :test 'eql)))
     (loop for x in list do
-         (setf (gethash x set) t))
+         (setf (gethash (aref (the (simple-array fixnum (3)) x) 2) set) t))
     set))
 
 (defun key-in-set (key set)
-  (gethash key set))
+  (declare ((simple-array fixnum (3)) key))
+  (gethash (aref key 2) set))
 
 (defun collect-axis (voro-set axis-sort)
   (let (res)
@@ -371,6 +373,7 @@
     (nreverse res)))
 
 (defun split-list-at-point (list n)
+  (declare (fixnum n))
   (if (= n 0)
       (values nil list)
       (loop repeat n
@@ -379,6 +382,7 @@
          finally (return (values head (cdr tail))))))
 
 (defun split-axis (axis-sort)
+  (declare (list axis-sort))
   (multiple-value-bind (left right)
       (split-list-at-point axis-sort (floor (length axis-sort) 2))
     (values left (car right) (cdr right))))
@@ -391,8 +395,8 @@
              (right-set (make-set right))
              (right (collect-axis right-set other-ax)))
         (list med
-              (make-kd-tree-helper left other-ax curr-ax)
-              (make-kd-tree-helper right other-ax curr-ax))))))
+              (make-kd-tree-helper left  left curr-ax)
+              (make-kd-tree-helper right right curr-ax))))))
 
 (defun make-kd-tree (voro)
   (let ((points (voro-to-kd-points voro)))
@@ -433,6 +437,7 @@
                        (nearest-neighbor-helper (second kd-tree) x y 0 nearest nearest-dist))))))))
 
 (defun nearest-neighbor (kd-tree x y)
+  (declare (fixnum x y))
   (let ((nearest (list (first kd-tree)))
         (nearest-dist (list (dist x y (first kd-tree)))))
     (nearest-neighbor-helper kd-tree x y 0 nearest nearest-dist)
