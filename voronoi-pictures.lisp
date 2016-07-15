@@ -400,14 +400,10 @@
     (multiple-value-bind (x-ax y-ax) (sort-kd-voro points)
       (make-kd-tree-helper x-ax x-ax y-ax))))
 
-(defun fsquare (x)
-  (declare (single-float x))
-  (* x x))
-
 (defun dist (x y point)
-  (declare (single-float x y) ((simple-array fixnum (3)) point))
-  (the single-float (sqrt (+ (fsquare (- x (aref point 0)))
-                             (fsquare (- y (aref point 1)))))))
+  (declare (fixnum x y) ((simple-array fixnum (3)) point))
+  (the single-float (sqrt (+ (the (signed-byte 32) (square (the (signed-byte 32) (- x (aref point 0)))))
+                             (the (signed-byte 32) (square (the (signed-byte 32) (- y (aref point 1)))))))))
 
 (defun nearest-neighbor-helper (kd-tree x y axis nearest nearest-dist)
   (declare (single-float x y))
@@ -439,7 +435,7 @@
 
 (defun nearest-neighbor (kd-tree x y)
   (let ((nearest (list (first kd-tree)))
-        (nearest-dist (list (dist (* 1.0 x) (* 1.0 y) (first kd-tree)))))
+        (nearest-dist (list (dist x y (first kd-tree)))))
     (nearest-neighbor-helper kd-tree (* 1.0 x) (* 1.0 y) 0 nearest nearest-dist)
     (the (simple-array fixnum (3)) (first nearest))))
 
@@ -448,7 +444,7 @@
 
 (defun runner (in-file out-file iterations)
   (progn
-    (setf lparallel:*kernel* (lparallel:make-kernel 4))
+    (setf lparallel:*kernel* (lparallel:make-kernel 8))
     (let* ((img (open-image in-file))
            (voro (initialize-voronoi-points img)))
       (multiple-value-bind (ar nvoro) (optimize-loop voro img iterations)
