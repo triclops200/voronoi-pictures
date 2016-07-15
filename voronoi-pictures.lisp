@@ -8,7 +8,7 @@
 (in-package :voronoi-pictures)
 
 
-(declaim (optimize (speed 3) (safety 0) (debug 0)))
+(declaim (optimize (speed 3) (safety 0) (debug 0) (space 0) (compilation-speed 0)))
 
 (defun do-image-invert ()
   (let ((img (read-png-file "test.png")))
@@ -120,30 +120,28 @@
          (setf (aref (v-average-color v) i) (floor (aref (v-sum-color v) i) (if (= 0 len) 1 len))))))
 
 (defun voronoi-bucket (arr v-arr minx maxx miny maxy)
-  (declare ((vector v) v-arr))
+  (declare ((vector v) v-arr)
+           ((simple-array fixnum (* *)) arr))
   (let ((kd-tree (make-kd-tree v-arr)))
-    (pmapc (lambda (i)
-             (loop for j from minx below maxx 
-                do 
-                  (let ((mini (nearest-voronoi j i kd-tree)))
-                    (setf (aref arr i j) mini))))
-           (range miny maxy))))
+    (pmap nil (lambda (i)
+                (loop for j from minx below maxx 
+                   do 
+                     (let ((mini (nearest-voronoi j i kd-tree)))
+                       (setf (aref arr i j) mini))))
+          (range miny maxy))))
 
 
 (defun voronoi-stat-collect (arr v-arr img)
-  (declare (type 8-bit-rgb-image img) ((vector v) v-arr))
+  (declare (type 8-bit-rgb-image img) ((vector v) v-arr)
+           ((simple-array fixnum (* *)) arr))
   (with-image-bounds (height width) img
     (loop for i below height
        do (loop for j below width 
              do 
                (let* ((mini (aref arr i j))
                       (vp (aref v-arr mini)))
-                 (if (not (equal vp 0))
-                     (progn
-                       (vector-push-extend (list i j) (v-points vp))
-                       (sum-colors (v-sum-color vp) (multiple-value-list (pixel img i j))))
-                     (progn
-                       (format t "ERROR: ~a~%" mini))))))))
+                 (vector-push-extend (list i j) (v-points vp))
+                 (sum-colors (v-sum-color vp) (multiple-value-list (pixel img i j))))))))
 
 (defun image-convert (img)
   (with-image-bounds (height width) img
@@ -199,8 +197,7 @@
         (setf (v-sse v) (/ (v-sse v) (sqrt val))))))
 
 (defun calc-errors (voro img)
-  (loop for v across voro do
-       (calc-error v img)))
+  (pmap nil (lambda (v) (calc-error v img)) voro))
 
 (defun find-worst-cell (voro)
   (min-index (lambda (v) (- (v-sse v))) voro))
@@ -344,6 +341,7 @@
 
 
 (defun voro-to-kd-points (voro)
+  (declare ((vector v) voro))
   (loop for i below (length voro) collecting
        (let ((v (aref voro i)))
          (make-array '(3)
@@ -402,51 +400,55 @@
     (multiple-value-bind (x-ax y-ax) (sort-kd-voro points)
       (make-kd-tree-helper x-ax x-ax y-ax))))
 
+(defun fsquare (x)
+  (declare (single-float x))
+  (* x x))
+
 (defun dist (x y point)
-  (declare (fixnum x y) ((simple-array fixnum (3)) point))
-  (the single-float (sqrt (+ (the (signed-byte 32) (square (the (signed-byte 32) (- x (aref point 0)))))
-                             (the (signed-byte 32) (square (the (signed-byte 32) (- y (aref point 1)))))))))
+  (declare (single-float x y) ((simple-array fixnum (3)) point))
+  (the single-float (sqrt (+ (fsquare (- x (aref point 0)))
+                             (fsquare (- y (aref point 1)))))))
 
 (defun nearest-neighbor-helper (kd-tree x y axis nearest nearest-dist)
-  (declare (fixnum x y))
+  (declare (single-float x y))
   (when kd-tree
     (let* ((p (first kd-tree))
            (d (dist x y p))
-           (val (aref p axis)))
+           (val (* 1.0 (aref p axis))))
       (declare ((simple-array fixnum (3)) p)
                (single-float d)
-               (fixnum val))
-      (when (< d (first nearest-dist))
+               (single-float val))
+      (when (< d (the single-float (first nearest-dist)))
         (setf (first nearest) p)
         (setf (first nearest-dist) d))
       (if (= axis 0)
           (if (< x val)
               (progn (nearest-neighbor-helper (second kd-tree) x y 1 nearest nearest-dist)
-                     (when (> (+ (first nearest-dist) x) val)
+                     (when (> (+ (the single-float (first nearest-dist)) x) val)
                        (nearest-neighbor-helper (third kd-tree) x y 1 nearest nearest-dist)))
               (progn (nearest-neighbor-helper (third kd-tree) x y 1 nearest nearest-dist)
-                     (when (< (- x (first nearest-dist)) val)
+                     (when (< (- x (the single-float (first nearest-dist))) val)
                        (nearest-neighbor-helper (second kd-tree) x y 1 nearest nearest-dist))))
           (if (< y val)
               (progn (nearest-neighbor-helper (second kd-tree) x y 0 nearest nearest-dist)
-                     (when (> (+ (first nearest-dist) y) val)
+                     (when (> (+ (the single-float (first nearest-dist)) y) val)
                        (nearest-neighbor-helper (third kd-tree) x y 0 nearest nearest-dist)))
               (progn (nearest-neighbor-helper (third kd-tree) x y 0 nearest nearest-dist)
-                     (when (< (- y (first nearest-dist)) val)
+                     (when (< (- y (the single-float (first nearest-dist))) val)
                        (nearest-neighbor-helper (second kd-tree) x y 0 nearest nearest-dist))))))))
 
 (defun nearest-neighbor (kd-tree x y)
   (let ((nearest (list (first kd-tree)))
-        (nearest-dist (list (dist x y (first kd-tree)))))
-    (nearest-neighbor-helper kd-tree x y 0 nearest nearest-dist)
-    (first nearest)))
+        (nearest-dist (list (dist (* 1.0 x) (* 1.0 y) (first kd-tree)))))
+    (nearest-neighbor-helper kd-tree (* 1.0 x) (* 1.0 y) 0 nearest nearest-dist)
+    (the (simple-array fixnum (3)) (first nearest))))
 
 (defun open-image (file)
   (image-convert (read-image-file file)))
 
 (defun runner (in-file out-file iterations)
   (progn
-    (setf lparallel:*kernel* (lparallel:make-kernel 8))
+    (setf lparallel:*kernel* (lparallel:make-kernel 4))
     (let* ((img (open-image in-file))
            (voro (initialize-voronoi-points img)))
       (multiple-value-bind (ar nvoro) (optimize-loop voro img iterations)
