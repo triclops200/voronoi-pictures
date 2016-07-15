@@ -341,7 +341,6 @@
 
 
 (defun voro-to-kd-points (voro)
-  (declare ((vector v) voro))
   (loop for i below (length voro) collecting
        (let ((v (aref voro i)))
          (make-array '(3)
@@ -406,7 +405,7 @@
                              (the (signed-byte 32) (square (the (signed-byte 32) (- y (aref point 1)))))))))
 
 (defun nearest-neighbor-helper (kd-tree x y axis nearest nearest-dist)
-  (declare (single-float x y))
+  (declare (fixnum x y))
   (when kd-tree
     (let* ((p (first kd-tree))
            (d (dist x y p))
@@ -436,7 +435,7 @@
 (defun nearest-neighbor (kd-tree x y)
   (let ((nearest (list (first kd-tree)))
         (nearest-dist (list (dist x y (first kd-tree)))))
-    (nearest-neighbor-helper kd-tree (* 1.0 x) (* 1.0 y) 0 nearest nearest-dist)
+    (nearest-neighbor-helper kd-tree x y 0 nearest nearest-dist)
     (the (simple-array fixnum (3)) (first nearest))))
 
 (defun open-image (file)
