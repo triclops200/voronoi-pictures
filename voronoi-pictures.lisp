@@ -117,7 +117,7 @@
     (loop for i below (length (v-sum-color v)) do
          (setf (aref (v-average-color v) i) (floor (aref (v-sum-color v) i) (if (= 0 len) 1 len))))))
 
-(defun voronoi-bucket (arr v-arr minx maxx miny maxy)
+(defun voronoi-bucket (arr v-arr minx maxx miny maxy &optional (first-run nil))
   (declare ((vector v) v-arr)
            ((simple-array fixnum (* *)) arr))
   (let ((kd-tree (make-kd-tree v-arr)))
@@ -134,9 +134,10 @@
                       (when (not (v-invalid newv))
                         (setf (v-invalid newv) t)
                         (setf (v-sum-color newv) (make-array 3 :element-type 'fixnum :initial-contents '(0 0 0))))
-                      (remhash (list i j) (v-points oldv))
-                      (set-key (list i j) (v-points newv))
-                      (setf (aref arr i j) mini))))
+                      (when (not (or first-run (= mini oldmini)))
+                        (remhash (list i j) (v-points oldv))
+                        (set-key (list i j) (v-points newv))
+                        (setf (aref arr i j) mini)))))
          (range miny maxy))))
 
 
@@ -272,7 +273,7 @@
     (with-image-bounds (height width) img
       (let ((minx 0) (maxx width)
             (miny 0) (maxy height))
-        (voronoi-bucket arr voro minx maxx miny maxy)
+        (voronoi-bucket arr voro minx maxx miny maxy t)
         (clear-voro voro)
         (loop for i below max do
              (progn
