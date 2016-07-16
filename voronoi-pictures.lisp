@@ -41,7 +41,8 @@
              :type (simple-array fixnum (3)))
   (average-color (make-array 3 :element-type '(unsigned-byte 8) :initial-contents '(0 0 0))
                  :type (simple-array (unsigned-byte 8) (3)))
-  (sse 0.0 :type single-float))
+  (sse 0.0 :type single-float)
+  (invalid t))
 
 (defun make-picture-array (img)
   (with-image-bounds (height width)
@@ -119,26 +120,34 @@
   (declare ((vector v) v-arr)
            ((simple-array fixnum (* *)) arr))
   (let ((kd-tree (make-kd-tree v-arr)))
-    (pmap nil (lambda (i)
-                (loop for j from minx below maxx 
-                   do 
-                     (let ((mini (nearest-voronoi j i kd-tree)))
-                       (setf (aref arr i j) mini))))
-          (range miny maxy))))
+    (map nil (lambda (i)
+               (loop for j from minx below maxx 
+                  do 
+                    (let* ((mini (nearest-voronoi j i kd-tree))
+                           (newv (aref v-arr mini))
+                           (oldmini (aref arr i j))
+                           (oldv (aref v-arr oldmini)))
+                      (when (not (v-invalid oldv))
+                        (setf (aref v-arr oldmini) (make-v :x (v-x oldv)
+                                                           :y (v-y oldv))))
+                      (when (not (v-invalid newv))
+                        (setf (aref v-arr mini) (make-v :x (v-x newv)
+                                                        :y (v-y newv))))
+                      (vector-push-extend (list i j) (v-points newv))
+                      (setf (aref arr i j) mini))))
+         (range miny maxy))))
 
 
-(defun voronoi-stat-collect (arr v-arr img)
-  (declare (type 8-bit-rgb-image img) ((vector v) v-arr)
-           ((simple-array fixnum (* *)) arr))
-  (with-image-bounds (height width) img
-    (loop for i below height
-       do (loop for j below width 
-             do 
-               (let* ((mini (aref arr i j))
-                      (vp (aref v-arr mini)))
-                 (vector-push-extend (list i j) (v-points vp))
-                 (multiple-value-bind (r g b) (pixel img i j)
-                   (sum-colors (v-sum-color vp) r g b)))))))
+(defun voronoi-stat-collect (v-arr img)
+  (declare (type 8-bit-rgb-image img) ((vector v) v-arr))
+  (pmap nil
+        (lambda (v)
+          (when (v-invalid v)
+            (loop for point across (v-points v) do
+                 (destructuring-bind (i j) point
+                   (multiple-value-bind (r g b) (pixel img i j)
+                     (sum-colors (v-sum-color v) r g b))))))
+        v-arr))
 
 (defun image-convert (img)
   (with-image-bounds (height width) img
@@ -163,7 +172,8 @@
 
 (defun fix-averages (voro)
   (loop for v across voro do
-       (average-color v)))
+       (when (v-invalid v)
+         (average-color v))))
 
 (defun make-picture (voro-map voro img)
   (with-image-bounds (height width) img
@@ -195,7 +205,9 @@
         (setf (v-sse v) (/ (v-sse v) (sqrt val))))))
 
 (defun calc-errors (voro img)
-  (pmap nil (lambda (v) (calc-error v img)) voro))
+  (pmap nil (lambda (v) (when (v-invalid v)
+                          (calc-error v img)
+                          (setf (v-invalid v) nil))) voro))
 
 (defun find-worst-cell (voro)
   (min-index (lambda (v) (- (v-sse v))) voro))
@@ -215,12 +227,6 @@
 (defun optimize-voros (voro)
   voro)
 
-(defun reset-voros (voro)
-  (declare ((vector v) voro))
-  (loop for i below (length voro) do
-       (let ((v (aref voro i)))
-         (setf (aref voro i) (make-v :x (v-x v)
-                                     :y (v-y v))))))
 
 (defun minimum (seq) 
   (the fixnum (reduce #'min seq :initial-value (elt seq 0))))
@@ -255,9 +261,8 @@
              (progn
                (format t "~a~a%        " #\return (/ (floor (* 10000 (/ i (* max 1.0)))) 100.0))
                (finish-output)
-               (reset-voros voro)
                (voronoi-bucket arr voro minx maxx miny maxy)
-               (voronoi-stat-collect arr voro img)
+               (voronoi-stat-collect voro img)
                (setf voro (optimize-voros voro))
                (fix-averages voro)
                (calc-errors voro img)
@@ -268,7 +273,7 @@
                  (setf miny (max 0 nminy))
                  (setf maxy (min height nmaxy))))))
       (voronoi-bucket arr voro 0 width 0 height)
-      (voronoi-stat-collect arr voro img)
+      (voronoi-stat-collect voro img)
       (fix-averages voro)
       (format t "~a100%        ~%" #\return)
       (values arr voro))))
@@ -387,16 +392,18 @@
       (split-list-at-point axis-sort (floor (length axis-sort) 2))
     (values left (car right) (cdr right))))
 
-(defun make-kd-tree-helper (voro curr-ax other-ax)
+(defpun make-kd-tree-helper (voro curr-ax other-ax)
   (when voro
     (multiple-value-bind (left med right) (split-axis voro)
-      (let* ((left-set (make-set left))
-             (left (collect-axis left-set other-ax))
-             (right-set (make-set right))
-             (right (collect-axis right-set other-ax)))
-        (list med
-              (make-kd-tree-helper left  left curr-ax)
-              (make-kd-tree-helper right right curr-ax))))))
+      (plet ((left-set (make-set left)) 
+             (right-set (make-set right)))
+        (plet ((left (collect-axis left-set other-ax))
+               (right (collect-axis right-set other-ax)))
+          (plet ((lt (make-kd-tree-helper left  left curr-ax))
+                 (rt (make-kd-tree-helper right right curr-ax)))
+            (list med
+                  lt
+                  rt)))))))
 
 (defun make-kd-tree (voro)
   (let ((points (voro-to-kd-points voro)))
