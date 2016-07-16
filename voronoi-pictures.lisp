@@ -11,25 +11,6 @@
 
 (declaim (optimize (speed 3) (safety 0) (debug 0) (space 0) (compilation-speed 0)))
 
-(defun do-image-invert ()
-  (let ((img (read-png-file "test.png")))
-    (typecase img
-      (8-bit-rgba-image
-       (locally
-           (declare (type 8-bit-rgba-image img))
-         (with-image-bounds (height width)
-             img
-           (time
-            (loop for i below height
-               do (loop for j below width 
-                     do 
-                       (multiple-value-bind (r g b a)
-                           (pixel img i j)
-                         (declare (type (unsigned-byte 8) r g b a))
-                         (setf (pixel img i j)
-                               (values (- 255 r) g b a))))))))))
-    (write-png-file "testinv.png" img)))
-
 (defun range (min max)
   (declare (fixnum min max))
   (loop for i from min below max collecting i))
@@ -134,7 +115,7 @@
                       (when (not (v-invalid newv))
                         (setf (v-invalid newv) t)
                         (setf (v-sum-color newv) (make-array 3 :element-type 'fixnum :initial-contents '(0 0 0))))
-                      (when (not (or first-run (= mini oldmini)))
+                      (when (or first-run (not (= mini oldmini)))
                         (remhash (list i j) (v-points oldv))
                         (set-key (list i j) (v-points newv))
                         (setf (aref arr i j) mini)))))
@@ -191,26 +172,35 @@
                                 (aref ac 2))))))
       image)))
 
-(defmacro inc-err-channel (v chan var)
-  `(incf (v-sse ,v) (square (- (aref (v-average-color ,v) ,chan) ,var))))
+(defun fsquare (x)
+  (declare (single-float x))
+  (* x x))
+
+(defmacro inc-err-channel (v refval val)
+  `(incf (v-sse ,v) (fsquare (- ,refval ,val))))
 
 
-(defun calc-error (v img)
+(defun calc-error (v ref-arr img)
   (declare (8-bit-rgb-image img))
-  (loop for point being the hash-keys of (v-points v) do
-       (multiple-value-bind (r g b) (pixel img (first point) (second point))
-         (inc-err-channel v 0 r)
-         (inc-err-channel v 1 g)
-         (inc-err-channel v 2 b)))
-  (let ((val (hash-table-count (v-points v))))
-    (if (< val (square *num-additions*))
-        (setf (v-sse v) 0.0)
-        (setf (v-sse v) (/ (v-sse v) (sqrt val))))))
+  (let* ((vr (aref (v-average-color v) 0))
+         (vg (aref (v-average-color v) 1))
+         (vb (aref (v-average-color v) 2)))
+    (multiple-value-bind (vl va vb) (rgb-lab vr vg vb)
+      (loop for point being the hash-keys of (v-points v) do
+           (multiple-value-bind (r g b) (pixel img (first point) (second point))
+             (multiple-value-bind (l a b) (rgb-lab r g b)
+               (inc-err-channel v vl l)
+               (inc-err-channel v va a)
+               (inc-err-channel v vb b)))))
+    (let ((val (hash-table-count (v-points v))))
+      (if (< val (square *num-additions*))
+          (setf (v-sse v) 0.0)
+          (setf (v-sse v) (/ (v-sse v) (sqrt val)))))))
 
 (defun calc-errors (voro img)
   (pmap nil (lambda (v)
               (when (v-invalid v)
-                (calc-error v img)
+                (calc-error v nil img)
                 (setf (v-invalid v) nil)))
         voro))
 
@@ -262,11 +252,6 @@
 
 (defparameter *num-additions* 5)
 
-(defun clear-voro (voro)
-  (loop for i below (length voro) do
-       (setf (aref voro i) (make-v :x (v-x (aref voro i))
-                                   :y (v-y (aref voro i))))))
-
 (defun optimize-loop (voro img max)
   (let ((voro voro)
         (arr (make-picture-array img)))
@@ -274,7 +259,6 @@
       (let ((minx 0) (maxx width)
             (miny 0) (maxy height))
         (voronoi-bucket arr voro minx maxx miny maxy t)
-        (clear-voro voro)
         (loop for i below max do
              (progn
                (format t "~a~a%        " #\return (/ (floor (* 10000 (/ i (* max 1.0)))) 100.0))
@@ -289,76 +273,55 @@
                  (setf maxx (min width nmaxx))
                  (setf miny (max 0 nminy))
                  (setf maxy (min height nmaxy))))))
+      (clear-voro voro)
       (voronoi-bucket arr voro 0 width 0 height t)
       (voronoi-stat-collect voro img)
       (fix-averages voro)
       (format t "~a100%        ~%" #\return)
       (values arr voro))))
 
-(defun rgb-hsv (r g b)
-  (let* ((min (* (/ 255.0) (min r g b)))
-         (max (* (/ 255.0) (max r g b)))
-         (v max)
-         (delta (- max min))
-         s h)
-    (when (< delta 0.01)
-      (setf delta 0.01))
-    (if (< max 0.00001)
-        (progn (setf s 0)
-               (setf h -1)
-               (return-from rgb-hsv (values 0 0 0)))
-        (progn
-          (setf s (/ delta max))
-          (if (= r max)
-              (setf h (/ (- g b) delta))
-              (if (= g max)
-                  (setf h (+ 2 (/ (- b r) delta)))
-                  (setf h (+ 4 (/ (- r g) delta)))))
-          (setf h (* h 60))))
-    (if (< h 0)
-        (incf h 360.0))
-    (values (coerce (max 0 (min 255 (floor (* (/ 255.0 360.0) h)))) '(unsigned-byte 8))
-            (coerce (max 0 (min 255 (floor (* 255.0 s)))) '(unsigned-byte 8))
-            (coerce (max 0 (min 255 (floor (* 255.0 v)))) '(unsigned-byte 8)))))
+(defmacro rgb-xyz-correct-channel (chan)
+  `(setf ,chan (* 100 (if (> ,chan 0.04045)
+                          (expt (/ (+ ,chan 0.055) 1.055) 2.4)
+                          (/ ,chan 12.92)))))
 
-(defun hsv-rgb (h s v)
-  (let (i f p q tt
-          (h (* (/ 360.0 255.0) h))
-          (s (* (/ 255.0) s))
-          (v (* (/ 255.0) v)))
-    (setf h (/ h 60.0))
-    (setf i (floor h))
-    (setf f (- h i))
-    (setf p (* v (- 1 s)))
-    (setf q (* v (- 1 (* s f))))
-    (setf tt (* v (- 1 (* s (- 1 f)))))
-    (multiple-value-bind (r g b)
-        (case i
-          (0 (values v tt p))
-          (1 (values q v p))
-          (2 (values p v tt))
-          (3 (values p q v))
-          (4 (values tt p v))
-          (5 (values v p q)))
-      (values (floor (* r 255.0))
-              (floor (* g 255.0))
-              (floor (* b 255.0))))))
+(defmacro linear-combine (wr wg wb)
+  `(+ (* vr ,wr) (* vg ,wg) (* vb ,wb)))
 
-(defun convert-image-to-hsv (img)
-  (with-image-bounds (height width) img
-    (loop for i below height do
-         (loop for j below width do
-              (multiple-value-bind (r g b) (pixel img i j)
-                (setf (pixel img i j) (rgb-hsv r g b))))))
-  img)
+(defparameter *ref_x*  95.047)
+(defparameter *ref_y* 100.000)
+(defparameter *ref_z* 108.883)
 
-(defun convert-image-to-rgb (img)
-  (with-image-bounds (height width) img
-    (loop for i below height do
-         (loop for j below width do
-              (multiple-value-bind (h s v) (pixel img i j)
-                (setf (pixel img i j) (hsv-rgb h s v))))))
-  img)
+(defun rgb-xyz (r g b)
+  (let ((vr (/ r 255.0))
+        (vg (/ g 255.0))
+        (vb (/ b 255.0)))
+    (rgb-xyz-correct-channel vr)
+    (rgb-xyz-correct-channel vg)
+    (rgb-xyz-correct-channel vb)
+    (values
+     (linear-combine 0.4124 0.3576 0.1805)
+     (linear-combine 0.2126 0.7152 0.0722)
+     (linear-combine 0.0193 0.1192 0.9505))))
+
+(defmacro xyz-lab-correct-channel (chan)
+  `(setf ,chan (if (> ,chan 0.008856)
+                   (expt ,chan (/ 1 3))
+                   (+ (/ 16.0 116) (* ,chan 7.787)))))
+(defun xyz-lab (x y z)
+  (let ((vx (/ x *ref_x*))
+        (vy (/ y *ref_y*))
+        (vz (/ z *ref_z*)))
+    (xyz-lab-correct-channel vx)
+    (xyz-lab-correct-channel vy)
+    (xyz-lab-correct-channel vz)
+    (values (- (* 116 vy) 16)
+            (* 500 (- vx vy))
+            (* 200 (- vy vz)))))
+
+(defun rgb-lab (r g b)
+  (multiple-value-bind (x y z) (rgb-xyz r g b)
+    (xyz-lab x y z)))
 
 (defun voro-to-kd-points (voro) 
   (loop for i below (length voro) collecting
