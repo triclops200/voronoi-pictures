@@ -289,7 +289,7 @@
                  (setf maxx (min width nmaxx))
                  (setf miny (max 0 nminy))
                  (setf maxy (min height nmaxy))))))
-      (voronoi-bucket arr voro 0 width 0 height)
+      (voronoi-bucket arr voro 0 width 0 height t)
       (voronoi-stat-collect voro img)
       (fix-averages voro)
       (format t "~a100%        ~%" #\return)
@@ -359,9 +359,6 @@
               (multiple-value-bind (h s v) (pixel img i j)
                 (setf (pixel img i j) (hsv-rgb h s v))))))
   img)
-
-
-
 
 (defun voro-to-kd-points (voro) 
   (loop for i below (length voro) collecting
