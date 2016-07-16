@@ -37,7 +37,7 @@
 (defstruct v
   (x 0 :type fixnum)
   (y 0 :type fixnum)
-  (points (make-array 0 :element-type 'list :adjustable t :fill-pointer t) :type (vector list))
+  (points (make-set nil))
   (sum-color (make-array 3 :element-type 'fixnum :initial-contents '(0 0 0))
              :type (simple-array fixnum (3)))
   (average-color (make-array 3 :element-type '(unsigned-byte 8) :initial-contents '(0 0 0))
@@ -113,7 +113,7 @@
 
 (defun average-color (v)
   (declare (type v v))
-  (let ((len (length (v-points v))))
+  (let ((len (hash-table-count (v-points v))))
     (loop for i below (length (v-sum-color v)) do
          (setf (aref (v-average-color v) i) (floor (aref (v-sum-color v) i) (if (= 0 len) 1 len))))))
 
@@ -129,15 +129,13 @@
                            (oldmini (aref arr i j))
                            (oldv (aref v-arr oldmini)))
                       (when (not (v-invalid oldv))
-                        (setf (aref v-arr oldmini) (make-v :x (v-x oldv)
-                                                           :y (v-y oldv)
-                                                           :invalid t)))
+                        (setf (v-invalid oldv) t)
+                        (setf (v-sum-color oldv) (make-array 3 :element-type 'fixnum :initial-contents '(0 0 0))))
                       (when (not (v-invalid newv))
-                        (setf (aref v-arr mini) (make-v :x (v-x newv)
-                                                        :y (v-y newv)
-                                                        :invalid t))
-                        (setf newv (aref v-arr mini)))
-                      (vector-push-extend (list i j) (v-points newv))
+                        (setf (v-invalid newv) t)
+                        (setf (v-sum-color newv) (make-array 3 :element-type 'fixnum :initial-contents '(0 0 0))))
+                      (remhash (list i j) (v-points oldv))
+                      (set-key (list i j) (v-points newv))
                       (setf (aref arr i j) mini))))
          (range miny maxy))))
 
@@ -147,7 +145,7 @@
   (pmap nil
         (lambda (v)
           (when (v-invalid v)
-            (loop for point across (v-points v) do
+            (loop for point being the hash-keys of (v-points v) do
                  (destructuring-bind (i j) point
                    (multiple-value-bind (r g b) (pixel img i j)
                      (sum-colors (v-sum-color v) r g b))))))
@@ -198,15 +196,15 @@
 
 (defun calc-error (v img)
   (declare (8-bit-rgb-image img))
-  (loop for point across (v-points v) do
+  (loop for point being the hash-keys of (v-points v) do
        (multiple-value-bind (r g b) (pixel img (first point) (second point))
          (inc-err-channel v 0 r)
          (inc-err-channel v 1 g)
          (inc-err-channel v 2 b)))
-  (let ((val (length (v-points v))))
+  (let ((val (hash-table-count (v-points v))))
     (if (< val (square *num-additions*))
         (setf (v-sse v) 0.0)
-        (setf (v-sse v) (v-sse v)))))
+        (setf (v-sse v) (/ (v-sse v) (sqrt val))))))
 
 (defun calc-errors (voro img)
   (pmap nil (lambda (v)
@@ -218,14 +216,22 @@
 (defun find-worst-cell (voro)
   (min-index (lambda (v) (- (v-sse v))) voro))
 
+(defun hash-table-to-array (table)
+  (let ((vec (make-array (hash-table-count table))))
+    (loop
+       for key being the hash-keys of table 
+       for i = 0 then (1+ i) do
+         (setf (aref vec i) key))
+    vec))
+
 (defun split-cell (voro v)
-  (setf (v-points v) (shuffle (v-points v)))
-  (loop for i below (min *num-additions* (length (v-points v))) do
-       (let ((p (aref (v-points v) i)))
-         (when (not (and (= (v-x v) (second p))
-                         (= (v-y v) (first p))))
-           (vector-push-extend (make-v :x (second p)
-                                       :y (first p)) voro)))))
+  (let ((s (shuffle (hash-table-to-array (v-points v)))))
+    (loop for i below (min *num-additions* (length s)) do
+         (let ((p (aref s i)))
+           (when (not (and (= (v-x v) (second p))
+                           (= (v-y v) (first p))))
+             (vector-push-extend (make-v :x (second p)
+                                         :y (first p)) voro))))))
 
 (defun split-lowest-cell (voro)
   (let ((v (nth-value 1 (find-worst-cell voro))))
@@ -239,16 +245,16 @@
   (the fixnum (reduce #'max seq :initial-value (elt seq 0))))
 
 (defun get-v-bounds (v)
-  (let* ((points (v-points v))
+  (let* ((points (hash-table-to-array (v-points v)))
          (xs (map 'list #'second points))
          (ys (map 'list #'first points))
          (mpi (min-index (lambda (p) (the fixnum
                                           (- (+ (square (the (signed-byte 32) (- (v-x v) (the fixnum (second p)))))
                                                 (square (the (signed-byte 32) (- (v-y v) (the fixnum (first p))))))))) points))
          (mp (aref points mpi))
-         (d (isqrt (the (signed-byte 32)
-                        (+ (square (the (signed-byte 32) (- (v-x v) (the fixnum (second mp)))))
-                           (square (the (signed-byte 32) (- (v-y v) (the fixnum (first mp))))))))))
+         (d (ceiling (isqrt (the (signed-byte 32)
+                                 (+ (square (the (signed-byte 32) (- (v-x v) (the fixnum (second mp)))))
+                                    (square (the (signed-byte 32) (- (v-y v) (the fixnum (first mp)))))))) 2)))
     (declare (fixnum d))
     (values (- (minimum xs) d) (+ (maximum xs) d)
             (- (minimum ys) d) (+ (maximum ys) d))))
@@ -371,14 +377,16 @@
     (values x-a y-a)))
 
 (defun make-set (list)
-  (let ((set (make-hash-table :test 'eql)))
+  (let ((set (make-hash-table :test 'equal)))
     (loop for x in list do
-         (setf (gethash (aref (the (simple-array fixnum (3)) x) 2) set) t))
+         (setf (gethash x set) t))
     set))
 
 (defun key-in-set (key set)
-  (declare ((simple-array fixnum (3)) key))
-  (gethash (aref key 2) set))
+  (gethash key set))
+
+(defun set-key (key set)
+  (setf (gethash key set) t))
 
 (defun collect-axis (voro-set axis-sort)
   (let (res)
