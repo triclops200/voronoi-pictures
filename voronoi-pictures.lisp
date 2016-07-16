@@ -273,7 +273,6 @@
                  (setf maxx (min width nmaxx))
                  (setf miny (max 0 nminy))
                  (setf maxy (min height nmaxy))))))
-      (clear-voro voro)
       (voronoi-bucket arr voro 0 width 0 height t)
       (voronoi-stat-collect voro img)
       (fix-averages voro)
