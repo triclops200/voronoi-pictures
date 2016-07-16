@@ -1,5 +1,6 @@
 (defpackage :voronoi-pictures
   (:use :cl)
+  (:use :alexandria)
   (:use :opticl)
   (:use :lparallel)
   (:use :voronoi-pictures.app-utils)
@@ -129,10 +130,13 @@
                            (oldv (aref v-arr oldmini)))
                       (when (not (v-invalid oldv))
                         (setf (aref v-arr oldmini) (make-v :x (v-x oldv)
-                                                           :y (v-y oldv))))
+                                                           :y (v-y oldv)
+                                                           :invalid t)))
                       (when (not (v-invalid newv))
                         (setf (aref v-arr mini) (make-v :x (v-x newv)
-                                                        :y (v-y newv))))
+                                                        :y (v-y newv)
+                                                        :invalid t))
+                        (setf newv (aref v-arr mini)))
                       (vector-push-extend (list i j) (v-points newv))
                       (setf (aref arr i j) mini))))
          (range miny maxy))))
@@ -202,31 +206,31 @@
   (let ((val (length (v-points v))))
     (if (< val (square *num-additions*))
         (setf (v-sse v) 0.0)
-        (setf (v-sse v) (/ (v-sse v) (sqrt val))))))
+        (setf (v-sse v) (v-sse v)))))
 
 (defun calc-errors (voro img)
-  (pmap nil (lambda (v) (when (v-invalid v)
-                          (calc-error v img)
-                          (setf (v-invalid v) nil))) voro))
+  (pmap nil (lambda (v)
+              (when (v-invalid v)
+                (calc-error v img)
+                (setf (v-invalid v) nil)))
+        voro))
 
 (defun find-worst-cell (voro)
   (min-index (lambda (v) (- (v-sse v))) voro))
 
 (defun split-cell (voro v)
-  (loop for i below *num-additions* do
-       (let ((point (aref (v-points v) (random (length (v-points v))))))
-         (unless (and (= (v-x v) (second point))
-                      (= (v-y v) (first point)))
-           (vector-push-extend (make-v :x (second point)
-                                       :y (first point)) voro)))))
+  (setf (v-points v) (shuffle (v-points v)))
+  (loop for i below (min *num-additions* (length (v-points v))) do
+       (let ((p (aref (v-points v) i)))
+         (when (not (and (= (v-x v) (second p))
+                         (= (v-y v) (first p))))
+           (vector-push-extend (make-v :x (second p)
+                                       :y (first p)) voro)))))
+
 (defun split-lowest-cell (voro)
   (let ((v (nth-value 1 (find-worst-cell voro))))
     (split-cell voro v)
     v))
-
-(defun optimize-voros (voro)
-  voro)
-
 
 (defun minimum (seq) 
   (the fixnum (reduce #'min seq :initial-value (elt seq 0))))
@@ -242,14 +246,19 @@
                                           (- (+ (square (the (signed-byte 32) (- (v-x v) (the fixnum (second p)))))
                                                 (square (the (signed-byte 32) (- (v-y v) (the fixnum (first p))))))))) points))
          (mp (aref points mpi))
-         (d (ceiling (isqrt (the (signed-byte 32)
-                                 (+ (square (the (signed-byte 32) (- (v-x v) (the fixnum (second mp)))))
-                                    (square (the (signed-byte 32) (- (v-y v) (the fixnum (first mp)))))))) 2)))
+         (d (isqrt (the (signed-byte 32)
+                        (+ (square (the (signed-byte 32) (- (v-x v) (the fixnum (second mp)))))
+                           (square (the (signed-byte 32) (- (v-y v) (the fixnum (first mp))))))))))
     (declare (fixnum d))
     (values (- (minimum xs) d) (+ (maximum xs) d)
             (- (minimum ys) d) (+ (maximum ys) d))))
 
 (defparameter *num-additions* 5)
+
+(defun clear-voro (voro)
+  (loop for i below (length voro) do
+       (setf (aref voro i) (make-v :x (v-x (aref voro i))
+                                   :y (v-y (aref voro i))))))
 
 (defun optimize-loop (voro img max)
   (let ((voro voro)
@@ -257,13 +266,14 @@
     (with-image-bounds (height width) img
       (let ((minx 0) (maxx width)
             (miny 0) (maxy height))
+        (voronoi-bucket arr voro minx maxx miny maxy)
+        (clear-voro voro)
         (loop for i below max do
              (progn
                (format t "~a~a%        " #\return (/ (floor (* 10000 (/ i (* max 1.0)))) 100.0))
                (finish-output)
                (voronoi-bucket arr voro minx maxx miny maxy)
                (voronoi-stat-collect voro img)
-               (setf voro (optimize-voros voro))
                (fix-averages voro)
                (calc-errors voro img)
                (multiple-value-bind (nminx nmaxx nminy nmaxy)

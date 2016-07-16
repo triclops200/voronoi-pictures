@@ -6,7 +6,8 @@
   :license "Modified BSD License"
   :serial t
   :depends-on (:opticl
-               :lparallel)
+               :lparallel
+               :alexandria)
   :pathname "./"
   :components ((:file "app-utils")
                (:file "voronoi-pictures")
