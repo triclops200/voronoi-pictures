@@ -261,7 +261,7 @@
 
 (defparameter *num-additions* 5)
 
-(defun optimize-loop (voro img max)
+(defun optimize-loop (voro img max color-shift)
   (let ((voro voro)
         (arr (make-picture-array img)))
     (with-image-bounds (height width) img
@@ -285,7 +285,7 @@
       (voronoi-bucket arr voro 0 width 0 height t)
       (voronoi-stat-collect voro img)
       (fix-averages voro)
-      (shift-averages voro)
+      (when color-shift (shift-averages voro))
       (format t "~a100%        ~%" #\return)
       (values arr voro))))
 
@@ -441,18 +441,19 @@
 (defun open-image (file)
   (image-convert (read-image-file file)))
 
-(defun runner (in-file out-file iterations)
+(defun runner (in-file out-file iterations &optional color-shift)
   (progn
     (setf lparallel:*kernel* (lparallel:make-kernel 8))
     (let* ((img (open-image in-file))
            (voro (initialize-voronoi-points img)))
-      (multiple-value-bind (ar nvoro) (optimize-loop voro img iterations)
+      (multiple-value-bind (ar nvoro) (optimize-loop voro img iterations color-shift)
         (let ((out-img (make-picture ar nvoro img)))
           (write-image-file out-file out-img))))))
 
 (defun -main (&optional args)
-  (if (not (= (length args) 4))
-      (format t "Usage: ~a <input-file> <output-file> <number-of-iterations> ~%" (and args (first args)))
+  (if (not (>= (length args) 4))
+      (format t "Usage: ~a <input-file> <output-file> <number-of-iterations> [color-shift] ~%" (and args (first args)))
       (runner (pathname (second args))
               (pathname  (third args))
-              (parse-integer (fourth args)))))
+              (parse-integer (fourth args))
+              (fifth args))))
