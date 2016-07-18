@@ -197,6 +197,15 @@
           (setf (v-sse v) 0.0)
           (setf (v-sse v) (/ (v-sse v) (sqrt val)))))))
 
+(defun shift-average (v)
+  (let ((acol (v-average-color v)))
+    (loop for i below 3 do
+         (let ((val (aref acol i)))
+           (setf (aref acol i) (min 255 (max 0 (round (+ val (- 20 (random 40.0)))))))))))
+
+(defun shift-averages (voros)
+  (pmap nil #'shift-average voros))
+
 (defun calc-errors (voro img)
   (pmap nil (lambda (v)
               (when (v-invalid v)
@@ -276,6 +285,7 @@
       (voronoi-bucket arr voro 0 width 0 height t)
       (voronoi-stat-collect voro img)
       (fix-averages voro)
+      (shift-averages voro)
       (format t "~a100%        ~%" #\return)
       (values arr voro))))
 
