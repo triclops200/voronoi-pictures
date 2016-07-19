@@ -29,7 +29,11 @@
 (defun make-picture-array (img)
   (with-image-bounds (height width)
       img
-    (make-array (list height width) :element-type 'fixnum )))
+    (let ((arr (make-array (list height width) :element-type 'fixnum )))
+      (loop for i below height do
+           (loop for j below width do
+                (setf (aref arr i j) 0)))
+      arr)))
 
 (defun in-bound-point (x min max)
   (if (< x min)
@@ -82,9 +86,26 @@
   (declare (fixnum x))
   (the fixnum (* x x)))
 
-(defun nearest-voronoi (x y kd-tree)
+(defun nearest-voronoi-old (x y kd-tree)
   (declare (fixnum x y))
   (aref (the (simple-array fixnum (3)) (nearest-neighbor kd-tree x y)) 2))
+
+(defun dist-sq-v (x y v)
+  (declare (fixnum x y))
+  (+ (square (- (v-x v) x)) (square (- (v-y v) y))))
+
+(defun nearest-voronoi (x y oldmini v-arr)
+  (declare (fixnum x y))
+  (let ((l (length v-arr))
+        (mindist (dist-sq-v x y (aref v-arr oldmini)))
+        (minind oldmini))
+    (loop for i in (cons oldmini (range (- l 5) l)) do 
+         (let* ((v (aref v-arr i))
+                (d  (dist-sq-v x y v)))
+           (when (< d mindist)
+             (setf mindist d)
+             (setf minind i))))
+    minind))
 
 (defun sum-colors (sum r g b)
   (declare ((simple-array fixnum (3)) sum) ((unsigned-byte 8) r g b))
@@ -98,14 +119,14 @@
     (loop for i below (length (v-sum-color v)) do
          (setf (aref (v-average-color v) i) (floor (aref (v-sum-color v) i) (if (= 0 len) 1 len))))))
 
-(defun voronoi-bucket (arr v-arr minx maxx miny maxy &optional (first-run nil))
+(defun voronoi-bucket-old (arr v-arr minx maxx miny maxy &optional (first-run nil))
   (declare ((vector v) v-arr)
            ((simple-array fixnum (* *)) arr))
   (let ((kd-tree (make-kd-tree v-arr)))
     (map nil (lambda (i)
                (loop for j from minx below maxx 
                   do 
-                    (let* ((mini (nearest-voronoi j i kd-tree))
+                    (let* ((mini (nearest-voronoi-old j i kd-tree))
                            (newv (aref v-arr mini))
                            (oldmini (aref arr i j))
                            (oldv (aref v-arr oldmini)))
@@ -121,6 +142,27 @@
                         (setf (aref arr i j) mini)))))
          (range miny maxy))))
 
+(defun voronoi-bucket (arr v-arr minx maxx miny maxy &optional (first-run nil))
+  (declare ((vector v) v-arr)
+           ((simple-array fixnum (* *)) arr))
+  (map nil (lambda (i)
+             (loop for j from minx below maxx 
+                do 
+                  (let* ((oldmini (aref arr i j))
+                         (oldv (aref v-arr oldmini))
+                         (mini (nearest-voronoi j i oldmini v-arr))
+                         (newv (aref v-arr mini)))
+                    (when (not (v-invalid oldv))
+                      (setf (v-invalid oldv) t)
+                      (setf (v-sum-color oldv) (make-array 3 :element-type 'fixnum :initial-contents '(0 0 0))))
+                    (when (not (v-invalid newv))
+                      (setf (v-invalid newv) t)
+                      (setf (v-sum-color newv) (make-array 3 :element-type 'fixnum :initial-contents '(0 0 0))))
+                    (when (or first-run (not (= mini oldmini)))
+                      (remhash (list i j) (v-points oldv))
+                      (set-key (list i j) (v-points newv))
+                      (setf (aref arr i j) mini)))))
+       (range miny maxy)))
 
 (defun voronoi-stat-collect (v-arr img)
   (declare (type 8-bit-rgb-image img) ((vector v) v-arr))
