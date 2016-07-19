@@ -86,9 +86,6 @@
   (declare (fixnum x))
   (the fixnum (* x x)))
 
-(defun nearest-voronoi-old (x y kd-tree)
-  (declare (fixnum x y))
-  (aref (the (simple-array fixnum (3)) (nearest-neighbor kd-tree x y)) 2))
 
 (defun dist-sq-v (x y v)
   (declare (fixnum x y))
@@ -99,7 +96,7 @@
   (let ((l (length v-arr))
         (mindist (dist-sq-v x y (aref v-arr oldmini)))
         (minind oldmini))
-    (loop for i in (cons oldmini (range (- l 5) l)) do 
+    (loop for i in (cons oldmini (range (- l *num-additions*) l)) do 
          (let* ((v (aref v-arr i))
                 (d  (dist-sq-v x y v)))
            (when (< d mindist)
@@ -118,29 +115,6 @@
   (let ((len (hash-table-count (v-points v))))
     (loop for i below (length (v-sum-color v)) do
          (setf (aref (v-average-color v) i) (floor (aref (v-sum-color v) i) (if (= 0 len) 1 len))))))
-
-(defun voronoi-bucket-old (arr v-arr minx maxx miny maxy &optional (first-run nil))
-  (declare ((vector v) v-arr)
-           ((simple-array fixnum (* *)) arr))
-  (let ((kd-tree (make-kd-tree v-arr)))
-    (map nil (lambda (i)
-               (loop for j from minx below maxx 
-                  do 
-                    (let* ((mini (nearest-voronoi-old j i kd-tree))
-                           (newv (aref v-arr mini))
-                           (oldmini (aref arr i j))
-                           (oldv (aref v-arr oldmini)))
-                      (when (not (v-invalid oldv))
-                        (setf (v-invalid oldv) t)
-                        (setf (v-sum-color oldv) (make-array 3 :element-type 'fixnum :initial-contents '(0 0 0))))
-                      (when (not (v-invalid newv))
-                        (setf (v-invalid newv) t)
-                        (setf (v-sum-color newv) (make-array 3 :element-type 'fixnum :initial-contents '(0 0 0))))
-                      (when (or first-run (not (= mini oldmini)))
-                        (remhash (list i j) (v-points oldv))
-                        (set-key (list i j) (v-points newv))
-                        (setf (aref arr i j) mini)))))
-         (range miny maxy))))
 
 (defun voronoi-bucket (arr v-arr minx maxx miny maxy &optional (first-run nil))
   (declare ((vector v) v-arr)
