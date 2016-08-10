@@ -114,7 +114,7 @@
   (declare (type v v))
   (let ((len (hash-table-count (v-points v))))
     (loop for i below (length (v-sum-color v)) do
-         (setf (aref (v-average-color v) i) (floor (aref (v-sum-color v) i) (if (= 0 len) 1 len))))))
+         (setf (aref (v-average-color v) i) (round (aref (v-sum-color v) i) (if (= 0 len) 1 len))))))
 
 (defun voronoi-bucket (arr v-arr minx maxx miny maxy &optional (first-run nil))
   (declare ((vector v) v-arr)
