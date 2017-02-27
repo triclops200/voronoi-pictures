@@ -216,10 +216,18 @@
           (setf (v-sse v) (/ (v-sse v) (sqrt val)))))))
 
 (defun shift-average (v)
-  (let ((acol (v-average-color v)))
-    (loop for i below 3 do
-         (let ((val (aref acol i)))
-           (setf (aref acol i) (min 255 (max 0 (round (+ val (- 20 (random 40.0)))))))))))
+  (let* ((acol (v-average-color v)))
+    (multiple-value-bind (l a b) (rgb-lab (aref acol 0)
+                                          (aref acol 1)
+                                          (aref acol 2))
+      
+      (let ((l (+ l (- 1 (random 2.0))))
+            (a (+ a (-  (random 4.0))))
+            (b (+ b (- 2 (random 4.0)))))
+        (multiple-value-bind (r g b) (lab-rgb l a b)
+          (setf (aref acol 0) r)
+          (setf (aref acol 1) g)
+          (setf (aref acol 2) b))))))
 
 (defun shift-averages (voros)
   (pmap nil #'shift-average voros))
@@ -338,6 +346,37 @@
      (linear-combine 0.2126 0.7152 0.0722)
      (linear-combine 0.0193 0.1192 0.9505))))
 
+(defun clip (v mi ma)
+  (if (> v ma)
+      ma
+      (if (< v mi)
+          mi
+          v)))
+
+(defmacro xyz-rgb-correct-channel (chan)
+  `(progn (setf ,chan
+                (round
+                 (clip
+                  (* 255.0 (if (> ,chan 0.0031308)
+                               (- (* 1.055 (expt ,chan (/ 2.4)))
+                                  0.055)
+                               (* 12.92 ,chan)))
+                  0.0
+                  255.0)))))
+
+(defun xyz-rgb (x y z)
+  (let ((vr (/ x 100.0))
+        (vg (/ y 100.0))
+        (vb (/ z 100.0)))
+    (let ((vr (linear-combine 3.2406 -1.5372 -0.4986))
+          (vg (linear-combine -0.9692 1.8758 0.0415))
+          (vb (linear-combine 0.0557 -0.2040 1.0570)))
+      (xyz-rgb-correct-channel vr)
+      (xyz-rgb-correct-channel vg)
+      (xyz-rgb-correct-channel vb)
+      (values vr vg vb))))
+
+
 (defmacro xyz-lab-correct-channel (chan)
   `(setf ,chan (if (> ,chan 0.008856)
                    (expt ,chan (/ 1 3))
@@ -353,9 +392,39 @@
             (* 500 (- vx vy))
             (* 200 (- vy vz)))))
 
+(defun cube (x)
+  (* x (* x x)))
+
+(defun lab-xyz (l a b)
+  (let*  ((fy (/ (+ l 16.0) 116.0))
+          (fz (- fy (/ b 200.0)))
+          (fx (+ fy (/ a 500.0)))
+          (fx3 (cube fx))
+          (fz3 (cube fz)))
+    (let ((k 903.3)
+          (e 0.008856))
+      (let ((x (if (> fx3 e)
+                   fx3
+                   (/ (- (* 116.0 fx) 16) k)))
+            (y (if (> l (* k e))
+                   (cube fy)
+                   (/ l k)))
+            (z (if (> fz3 e)
+                   fz3
+                   (/ (- (* 116.0 fz) 16) k))))
+        (values
+         (* x *ref_x*)
+         (* y *ref_y*)
+         (* z *ref_z*))))))
+
+
 (defun rgb-lab (r g b)
   (multiple-value-bind (x y z) (rgb-xyz r g b)
     (xyz-lab x y z)))
+
+(defun lab-rgb (l a b)
+  (multiple-value-bind (x y z) (lab-xyz l a b)
+    (xyz-rgb x y z)))
 
 (defun voro-to-kd-points (voro) 
   (loop for i below (length voro) collecting
