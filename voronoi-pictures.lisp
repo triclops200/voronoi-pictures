@@ -89,14 +89,16 @@
 
 (defun dist-sq-v (x y v)
   (declare (fixnum x y))
-  (+ (square (- (v-x v) x)) (square (- (v-y v) y))))
+  (the fixnum
+       (+ (the fixnum (square (the fixnum (- (the fixnum (v-x v)) x))))
+          (the fixnum (square (the fixnum (- (the fixnum (v-y v)) y)))))))
 
 (defun nearest-voronoi (x y oldmini v-arr)
-  (declare (fixnum x y))
+  (declare (fixnum x y oldmini) ((vector v) v-arr))
   (let ((l (length v-arr))
         (mindist (dist-sq-v x y (aref v-arr oldmini)))
         (minind oldmini))
-    (loop for i in (range (- l *num-additions*) l) do 
+    (loop for i in (range (the fixnum (- l (the fixnum *num-additions*))) l) do 
          (let* ((v (aref v-arr i))
                 (d  (dist-sq-v x y v)))
            (when (< d mindist)
@@ -118,8 +120,10 @@
 
 (defun voronoi-bucket (arr v-arr minx maxx miny maxy &optional (first-run nil))
   (declare ((vector v) v-arr)
+           (fixnum minx maxx miny maxy)
            ((simple-array fixnum (* *)) arr))
   (map nil (lambda (i)
+             (declare (fixnum i))
              (loop for j from minx below maxx 
                 do 
                   (let* ((oldmini (aref arr i j))
@@ -195,7 +199,8 @@
   (* x x))
 
 (defmacro inc-err-channel (v refval val)
-  `(incf (v-sse ,v) (fsquare (- ,refval ,val))))
+  `(incf (v-sse ,v) (fsquare (the single-float (- (the single-float ,refval)
+                                                  (the single-float ,val))))))
 
 
 (defun calc-error (v ref-arr img)
@@ -255,8 +260,8 @@
   (let ((s (shuffle (hash-table-to-array (v-points v)))))
     (loop for i below (min *num-additions* (length s)) do
          (let ((p (aref s i)))
-           (when (not (and (= (v-x v) (second p))
-                           (= (v-y v) (first p))))
+           (when (not (and (= (v-x v) (the fixnum (second p)))
+                           (= (v-y v) (the fixnum (first p)))))
              (vector-push-extend (make-v :x (second p)
                                          :y (first p)) voro))))))
 
@@ -282,9 +287,10 @@
                                   (square (the (signed-byte 32)
                                                (- (v-x v) (the fixnum (second p)))))
                                   (square (the (signed-byte 32)
-                                               (- (v-y v) (the fixnum (first p))))))))) points))
+                                               (- (v-y v) (the fixnum (first p)))))))))
+                         points))
          (mp (aref points mpi))
-         (d (* 2
+         (d (+ 1
                (ceiling (isqrt (the (signed-byte 32)
                                     (+
                                      (square (the (signed-byte 32)
@@ -296,6 +302,7 @@
             (- (minimum ys) d) (+ (maximum ys) d))))
 
 (defparameter *num-additions* 5)
+(declaim (fixnum *num-additions*))
 
 (defun optimize-loop (voro img max color-shift)
   (let ((voro voro)
@@ -334,13 +341,26 @@
   `(+ (* vr ,wr) (* vg ,wg) (* vb ,wb)))
 
 (defparameter *ref_x*  95.047)
-(defparameter *ref_y* 100.000)
-(defparameter *ref_z* 108.883)
+(defparameter *inv_ref_x* (/ 1 *ref_x*))
+(declaim (type single-float *inv_ref_x*))
 
-(defun rgb-xyz (r g b)
-  (let ((vr (/ r 255.0))
-        (vg (/ g 255.0))
-        (vb (/ b 255.0)))
+(defparameter *ref_y* 100.000)
+(defparameter *inv_ref_y* (/ 1 *ref_y*))
+(declaim (type single-float *inv_ref_y*))
+
+(defparameter *ref_z* 108.883)
+(defparameter *inv_ref_z* (/ 1 *ref_z*))
+(declaim (type single-float *inv_ref_z*))
+
+(defparameter *inv255* (/ 1 255.0))
+(declaim (type single-float *inv255*))
+
+(defun rgb-xyz (r g b) 
+  (declare (unsigned-byte r g b))
+  (let ((vr (* r *inv255*))
+        (vg (* g *inv255*))
+        (vb (* b *inv255*)))
+    (declare (single-float vr vg vb))
     (rgb-xyz-correct-channel vr)
     (rgb-xyz-correct-channel vg)
     (rgb-xyz-correct-channel vb)
@@ -349,7 +369,7 @@
      (linear-combine 0.2126 0.7152 0.0722)
      (linear-combine 0.0193 0.1192 0.9505))))
 
-(defun clip (v mi ma)
+(defun clip (v mi ma) 
   (if (> v ma)
       ma
       (if (< v mi)
@@ -359,18 +379,22 @@
 (defmacro xyz-rgb-correct-channel (chan)
   `(progn (setf ,chan
                 (round
-                 (clip
-                  (* 255.0 (if (> ,chan 0.0031308)
-                               (- (* 1.055 (expt ,chan (/ 2.4)))
-                                  0.055)
-                               (* 12.92 ,chan)))
-                  0.0
-                  255.0)))))
+                 (the single-float
+                      (clip
+                       (the single-float
+                            (* 255.0 (if (> ,chan 0.0031308)
+                                         (- (* 1.055 (expt ,chan (/ 2.4)))
+                                            0.055)
+                                         (* 12.92 ,chan))))
+                       0.0
+                       255.0))))))
 
 (defun xyz-rgb (x y z)
-  (let ((vr (/ x 100.0))
-        (vg (/ y 100.0))
-        (vb (/ z 100.0)))
+  (declare (single-float x y z))
+  (let ((vr (* x 0.01))
+        (vg (* y 0.01))
+        (vb (* z 0.01)))
+    (declare (single-float vr vg vb))
     (let ((vr (linear-combine 3.2406 -1.5372 -0.4986))
           (vg (linear-combine -0.9692 1.8758 0.0415))
           (vb (linear-combine 0.0557 -0.2040 1.0570)))
@@ -384,10 +408,12 @@
   `(setf ,chan (if (> ,chan 0.008856)
                    (expt ,chan (/ 1 3))
                    (+ (/ 16.0 116) (* ,chan 7.787)))))
+
 (defun xyz-lab (x y z)
-  (let ((vx (/ x *ref_x*))
-        (vy (/ y *ref_y*))
-        (vz (/ z *ref_z*)))
+  (declare (single-float x y z))
+  (let ((vx (* x *inv_ref_x*))
+        (vy (* y *inv_ref_y*))
+        (vz (* z *inv_ref_z*)))
     (xyz-lab-correct-channel vx)
     (xyz-lab-correct-channel vy)
     (xyz-lab-correct-channel vz)
@@ -444,7 +470,7 @@
     (values x-a y-a)))
 
 (defun make-set (list)
-  (let ((set (make-hash-table :test 'equal)))
+  (let ((set (make-hash-table :test 'equal :size 128)))
     (loop for x in list do
          (setf (gethash x set) t))
     set))
