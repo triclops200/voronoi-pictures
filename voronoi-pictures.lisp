@@ -9,7 +9,10 @@
 (in-package :voronoi-pictures)
 
 
-(declaim (optimize (speed 3) (safety 0) (debug 0) (space 0) (compilation-speed 0)))
+(declaim (optimize (speed 3) (safety 3) (debug 3) (space 0) (compilation-speed 0)))
+
+(defparameter *num-additions* 5)
+(declaim (fixnum *num-additions*))
 
 (defun range (min max)
   (declare (fixnum min max))
@@ -25,6 +28,39 @@
                  :type (simple-array (unsigned-byte 8) (3)))
   (sse 0.0 :type single-float)
   (invalid t))
+
+(defun copy-table (table)
+  (let ((new-table (make-hash-table
+                    :test (hash-table-test table)
+                    :size (hash-table-size table))))
+    (maphash #'(lambda(key value)
+                 (setf (gethash key new-table) value))
+             table)
+    new-table))
+
+(defun copy-voro (voro)
+  (let* ((dimensions (array-dimensions voro))
+         (new-array (make-array dimensions
+                                :element-type (array-element-type voro)
+                                :adjustable (adjustable-array-p voro)
+                                :fill-pointer (and (array-has-fill-pointer-p voro)
+                                                   (fill-pointer voro)))))
+    (dotimes (i (length voro))
+      (setf (row-major-aref new-array i)
+            (copy-vo (row-major-aref voro i))))
+    new-array))
+
+(defun copy-vo (v)
+  (make-v :x (v-x v)
+          :y (v-y v)
+          :points (copy-set (v-points v))
+          :sum-color (copy-array (v-sum-color v))
+          :average-color (copy-array (v-average-color v))
+          :sse (v-sse v)
+          :invalid (v-invalid v)))
+
+(defun copy-set (set)
+  (copy-table set))
 
 (defun make-picture-array (img)
   (with-image-bounds (height width)
@@ -62,9 +98,9 @@
   (with-image-bounds (imh imw) img
     (get-random-point-in-image 0 imw 0 imh img)))
 
-(defun initialize-voronoi-points (img)
+(defun initialize-voronoi-points (img &optional (num-additions *num-additions* ))
   (let ((v-arr (make-array 0 :element-type 'v :adjustable t :fill-pointer t)))
-    (loop for i from 0 below *num-additions* do
+    (loop for i from 0 below num-additions do
          (destructuring-bind (x y)
              (get-random-initial-point img)
            (let ((v (make-v :x x :y y)))
@@ -83,8 +119,8 @@
     (values mini (aref arr mini))))
 
 (defun square (x)
-  (declare (fixnum x))
-  (the fixnum (* x x)))
+  (declare (number x))
+  (the number (* x x)))
 
 
 (defun dist-sq-v (x y v)
@@ -301,8 +337,6 @@
     (values (- (minimum xs) d) (+ (maximum xs) d)
             (- (minimum ys) d) (+ (maximum ys) d))))
 
-(defparameter *num-additions* 5)
-(declaim (fixnum *num-additions*))
 
 (defun optimize-loop (voro img max color-shift &optional video)
   (let ((voro voro)
@@ -321,6 +355,7 @@
                (calc-errors voro img)
                (when video
                  (let ((pic (make-picture arr voro img)))
+                   
                    (write-image-file (format nil "~a/video-~12,'0d.png" video i) pic)))
                (multiple-value-bind (nminx nmaxx nminy nmaxy)
                    (get-v-bounds (split-lowest-cell voro))
@@ -519,25 +554,26 @@
                   lt
                   rt)))))))
 
-(defun make-kd-tree (voro)
+(defun make-kd-tree-from-voro (voro)
   (let ((points (voro-to-kd-points voro)))
-    (multiple-value-bind (x-ax y-ax) (sort-kd-voro points)
-      (make-kd-tree-helper x-ax x-ax y-ax))))
+    (make-kd-tree points)))
+
+(defun make-kd-tree (kd-points)
+  (multiple-value-bind (x-ax y-ax) (sort-kd-voro kd-points)
+    (make-kd-tree-helper x-ax x-ax y-ax)))
 
 (defun dist (x y point)
-  (declare (fixnum x y) ((simple-array fixnum (3)) point))
-  (the single-float (sqrt (+ (the (signed-byte 32)
-                                  (square (the (signed-byte 32) (- x (aref point 0)))))
-                             (the (signed-byte 32)
-                                  (square (the (signed-byte 32) (- y (aref point 1)))))))))
+  (declare (number x y) ((simple-array number (3)) point))
+  (sqrt (+ (square (- x (aref point 0)))
+           (square (- y (aref point 1))))))
 
 (defun nearest-neighbor-helper (kd-tree x y axis nearest nearest-dist)
-  (declare (fixnum x y))
+  (declare (number x y))
   (when kd-tree
     (let* ((p (first kd-tree))
            (d (dist x y p))
            (val (* 1.0 (aref p axis))))
-      (declare ((simple-array fixnum (3)) p)
+      (declare ((simple-array number (3)) p)
                (single-float d)
                (single-float val))
       (when (< d (the single-float (first nearest-dist)))
@@ -560,11 +596,14 @@
                        (nearest-neighbor-helper (second kd-tree) x y 0 nearest nearest-dist))))))))
 
 (defun nearest-neighbor (kd-tree x y)
-  (declare (fixnum x y))
+  (declare (number x y))
   (let ((nearest (list (first kd-tree)))
         (nearest-dist (list (dist x y (first kd-tree)))))
     (nearest-neighbor-helper kd-tree x y 0 nearest nearest-dist)
-    (the (simple-array fixnum (3)) (first nearest))))
+    (the (simple-array number (3)) (first nearest))))
+
+(defun nearest-voro (voros kd-tree x y)
+  (aref voros (aref (nearest-neighbor kd-tree x y) 2)))
 
 (defun open-image (file)
   (image-convert (read-image-file file)))
@@ -587,3 +626,31 @@
               (if (fifth args)
                   (/ (parse-integer (fifth args)) 100.0)
                   0.0))))
+
+(defun voronoi-diagram (arr v-arr minx maxx miny maxy &optional (first-run nil))
+  (declare ((vector v) v-arr)
+           (fixnum minx maxx miny maxy)
+           ((simple-array fixnum (* *)) arr))
+  (let ((kd-tree (make-kd-tree-from-voro v-arr)))
+    (map nil (lambda (i)
+               (declare (fixnum i))
+               (loop for j from minx below maxx 
+                  do 
+                    (let* ((oldmini (aref arr i j))
+                           (oldv (aref v-arr oldmini))
+                           (mini (nearest-voro v-arr))
+                           (newv (aref v-arr mini)))
+                      (when (or first-run (not (= mini oldmini)))
+                        (when (not (v-invalid oldv))
+                          (setf (v-invalid oldv) t)
+                          (setf (v-sum-color oldv)
+                                (make-array 3 :element-type 'fixnum :initial-contents '(0 0 0))))
+                        (when (not (v-invalid newv))
+                          (setf (v-invalid newv) t)
+                          (setf (v-sum-color newv)
+                                (make-array 3 :element-type 'fixnum :initial-contents '(0 0 0))))
+                        (remhash (list i j) (v-points oldv))
+                        (set-key (list i j) (v-points newv))
+                        (setf (aref arr i j) mini)))))
+         (range miny maxy))))
+(defun eval-perf (arr voro))
