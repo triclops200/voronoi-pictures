@@ -304,7 +304,7 @@
 (defparameter *num-additions* 5)
 (declaim (fixnum *num-additions*))
 
-(defun optimize-loop (voro img max color-shift)
+(defun optimize-loop (voro img max color-shift &optional video)
   (let ((voro voro)
         (arr (make-picture-array img)))
     (with-image-bounds (height width) img
@@ -317,8 +317,11 @@
                (finish-output)
                (voronoi-bucket arr voro minx maxx miny maxy)
                (voronoi-stat-collect voro img)
-               (fix-averages voro)
+               (fix-averages voro)                                
                (calc-errors voro img)
+               (when video
+                 (let ((pic (make-picture arr voro img)))
+                   (write-image-file (format nil "~a/video-~12,'0d.png" video i) pic)))
                (multiple-value-bind (nminx nmaxx nminy nmaxy)
                    (get-v-bounds (split-lowest-cell voro))
                  (setf minx (max 0 nminx))
