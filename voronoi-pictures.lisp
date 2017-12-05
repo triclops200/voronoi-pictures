@@ -612,6 +612,8 @@
     (let* ((img (open-image in-file))
            (voro (initialize-voronoi-points img)))
       (multiple-value-bind (ar nvoro) (optimize-loop voro img iterations color-shift)
+        (let ((lab-img (make-lab-img img)))
+          (print (eval-voro voro img lab-img)))
         (let ((out-img (make-picture ar nvoro img)))
           (write-image-file out-file out-img))))))
 
@@ -642,6 +644,19 @@
                         (setf (v-points newv) (make-set (list))))
                       (set-key (list i j) (v-points newv))
                       ;;(setf (aref arr i j) mini)
+                      )))
+         (range miny maxy))))
+
+(defun voronoi-arr (arr v-arr minx maxx miny maxy)
+  (declare ((vector v) v-arr)
+           (fixnum minx maxx miny maxy))
+  (let ((kd-tree (make-kd-tree-from-voro v-arr)))
+    (map nil (lambda (i)
+               (declare (fixnum i))
+               (loop for j from minx below maxx 
+                  do 
+                    (let* ((mini (nearest-neighbor kd-tree j i)))
+                      (setf (aref arr i j) mini)
                       )))
          (range miny maxy))))
 
@@ -834,13 +849,36 @@ POP-SIZE, using various functions"
 
 ;; img lab-img
 (defun gen-runner ()
-  (let* ((img (open-image "../pres/leaf0.png"))
+  (let* ((img (open-image "../tree.png"))
          (lab-img (make-lab-img img)))
-    (evolve 3 20 :setup (lambda ())
-            :creator (lambda () (initialize-voronoi-points img 5000))
-            :selector #'tournament-selector
-            :modifier (lambda (mom dad) (list mom dad))
-            :evaluator (lambda (voro) (eval-voro voro img lab-img))
-            :printer (lambda (_ fits) (print (first fits))))
-    nil))
+    (let ((voro (evolve 300 30 :setup (lambda ())
+                        :creator (lambda () (initialize-voronoi-points img 5000))
+                        :selector #'tournament-selector
+                        :modifier (lambda (mom dad) (modifier mom dad img))
+                        :evaluator (lambda (voro) (- (eval-voro voro img lab-img)))
+                        :printer (lambda (_ fits) (print (first fits))))))
+      voro)))
 
+
+(defun voro-modifier (vo width height)
+  (when (random? 0.01)
+    (setf (v-x vo) (random width))
+    (setf (v-y vo) (random height)))
+  vo)
+
+(defun vl-modifier (voro img)
+  (with-image-bounds (height width) img
+    (if (random? 0.90)
+        (map 'vector (lambda (vo) (voro-modifier vo width height)) voro)
+        (initialize-voronoi-points img 5000))))
+
+(defun modifier (mom dad img)
+  (let ((c1 (copy-voro mom))
+        (c2 (copy-voro dad)))
+    (loop for i below (length mom) do
+         (when (random? 0.02)
+           (setf (aref c1 i) (aref dad i))
+           (setf (aref c2 i) (aref mom i))))
+    (vl-modifier c1 img)
+    (vl-modifier c2 img)
+    (list c1 c2)))
