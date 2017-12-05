@@ -9,7 +9,7 @@
 (in-package :voronoi-pictures)
 
 
-(declaim (optimize (speed 3) (safety 0) (debug 0) (space 0) (compilation-speed 0)))
+(declaim (optimize (speed 3) (safety 3) (debug 3) (space 0) (compilation-speed 0)))
 
 (defparameter *num-additions* 5)
 (declaim (fixnum *num-additions*))
@@ -688,16 +688,159 @@
 (defun calc-sum-errors (voro lab-img)
   (reduce #'+
           (pmap 'list (lambda (v)
-                        (when (v-invalid v)
-                          (let ((e (calc-sum-error v lab-img)))
-                            (setf (v-invalid v) nil)
-                            e)))
+                        (calc-sum-error v lab-img))
                 voro)
           :initial-value 0))
 
 (defun eval-voro (voro img lab-img)
+  (loop for v across voro do
+       (progn
+         (setf (v-invalid v) nil)
+         (setf (v-sum-color v)
+               (make-array 3 :element-type 'fixnum :initial-contents '(0 0 0)))
+         (setf (v-sse v) 0.0)))
   (with-image-bounds (height width) img
     (voronoi-diagram voro 0 width 0 height))
   (voronoi-stat-collect voro img)
   (fix-averages voro)                                
   (calc-sum-errors voro lab-img))
+
+
+
+(defun random? (&optional (prob 0.5))
+  "Tosses a coin of prob probability of coming up heads,
+then returns t if it's heads, else nil."
+  (< (random 1.0) prob))
+
+(defun generate-list (num function &optional no-duplicates)
+  "Generates a list of size NUM, with each element created by
+  (funcall FUNCTION).  If no-duplicates is t, then no duplicates
+are permitted (FUNCTION is repeatedly called until a unique
+new slot is created).  EQUALP is the test used for duplicates."
+  (let (bag)
+    (while (< (length bag) num) bag
+           (let ((candidate (funcall function)))
+             (unless (and no-duplicates
+                          (member candidate bag :test #'equalp))
+               (push candidate bag))))
+    bag))
+
+(defun random-pair (firsts seconds)
+  (random-elt
+   (mapcar #'cons
+		   firsts
+		   seconds)))
+
+(defparameter *tournament-size* 5)
+(defun tournament-select-one (population fitnesses)
+  "Does one tournament selection and returns the selected individual."
+  (let ((participants
+		 (generate-list *tournament-size*
+						(lambda ()
+						  (random-pair population fitnesses)))))
+    (copy-voro (first (reduce
+                       (lambda (a b) 
+                         (if (> (cdr a) (cdr b))
+                             a
+                             b))
+                       participants)))))
+
+
+(defun tournament-selector (num population fitnesses)
+  "Does NUM tournament selections, and puts them all in a list"
+  (loop repeat num
+	 collect (tournament-select-one population fitnesses)))
+
+(defun best-by (evaluator collection)
+  (reduce
+   (lambda (a b)
+     (if (> (funcall evaluator a) (funcall evaluator b))
+		 a
+		 b))
+   collection))
+
+(defun best-pair (values scores)
+  (let ((pairs (mapcar #'cons
+					   values scores)))
+	(best-by #'cdr pairs)))
+
+(defun evolve (generations pop-size
+               &key setup creator selector modifier evaluator printer)
+  "Evolves for some number of GENERATIONS, creating a population of size
+POP-SIZE, using various functions"
+  ;; The functions passed in are as follows:
+  ;;(SETUP)                     called at the beginning of evolution, to set up
+  ;;                            global variables as necessary
+  ;;(CREATOR)                   creates a random individual
+  ;;(SELECTOR num pop fitneses) given a population and a list of corresponding fitnesses,
+  ;;                            selects and returns NUM individuals as a list.
+  ;;                            An individual may appear more than once in the list.
+  ;;(MODIFIER ind1 ind2)        modifies individuals ind1 and ind2 by crossing them
+  ;;                            over and mutating them.  Returns the two children
+  ;;                            as a list: (child1 child2).  Nondestructive to
+  ;;                            ind1 and ind2.
+  ;;(PRINTER pop fitnesses)     prints the best individual in the population, plus
+  ;;                            its fitness, and any other interesting statistics
+  ;;                            you think interesting for that generation.
+  ;;(EVALUATOR individual)      evaluates an individual, and returns its fitness.
+  ;;Pop will be guaranteed to be a multiple of 2 in size.
+  ;;
+  ;; HIGHER FITNESSES ARE BETTER
+  
+  ;; your function should call PRINTER each generation, and also print out or the
+  ;; best individual discovered over the whole run at the end, plus its fitness
+  ;; and any other statistics you think might be nifty.
+  
+    ;;; IMPLEMENT ME
+  ;; setup pre-first-gen
+  (funcall setup)
+  (let* ((current-population
+		  (loop repeat pop-size
+			 collecting (funcall creator)))
+		 (current-fitnesses
+		  (pmap 'list evaluator current-population))
+		 (best '(() . ()))
+		 (gen 0)
+		 greatest-generation)
+    ;; now do stuff for each generation
+    (loop repeat generations
+       do
+		 (progn
+		   
+		   (incf gen)
+		   (let ((moms (funcall selector (/ pop-size 2) ; choose which individuals reproduce
+								current-population
+								current-fitnesses))
+				 (dads (funcall selector (/ pop-size 2)
+								current-population
+								current-fitnesses)))
+			 (setf current-population ; make children and cull
+				   (mapcan modifier moms dads)))
+		   (setf current-fitnesses ; recalculate fitnesses
+				 (pmap 'list evaluator current-population))
+           '	   (funcall printer current-population current-fitnesses)
+                   (let ((new-best
+                          (best-pair current-population current-fitnesses)))
+                     (if (or (not (cdr best))
+                             (> (cdr new-best) (cdr best)))
+                         (progn
+                           (setf best new-best)
+                           (setf greatest-generation gen))))))
+    ;; write up the entire run
+	(format t "~%~%Best Result:~%")
+    (format t "Greatest Generation: ~D~%" greatest-generation)
+    (funcall printer (list (car best)) (list (cdr best)))
+    (car best)))
+
+;; img lab-img
+(defun gen-runner ()
+  (let* ((img (open-image "../../../test.png"))
+         (lab-img (make-lab-img img)))
+    (evolve 3 20 :setup (lambda ())
+            :creator (lambda () (initialize-voronoi-points img 1000))
+            :selector #'tournament-selector
+            :modifier (lambda (mom dad) (list mom dad))
+            :evaluator (lambda (voro) (eval-voro voro img lab-img))
+            :printer (lambda (_ fits) (print (first fits))))
+    nil))
+
