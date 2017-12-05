@@ -175,8 +175,8 @@
                         (setf (v-invalid newv) t)
                         (setf (v-sum-color newv)
                               (make-array 3 :element-type 'fixnum :initial-contents '(0 0 0))))
-                      (remhash (list i j) (v-points oldv))
-                      (set-key (list i j) (v-points newv))
+                      (remhash (cons i j) (v-points oldv))
+                      (set-key (cons i j) (v-points newv))
                       (setf (aref arr i j) mini)))))
        (range miny maxy)))
 
@@ -186,7 +186,7 @@
         (lambda (v)
           (when (v-invalid v)
             (loop for point being the hash-keys of (v-points v) do
-                 (destructuring-bind (i j) point
+                 (destructuring-bind (i . j) point
                    (multiple-value-bind (r g b) (pixel img i j)
                      (sum-colors (v-sum-color v) r g b))))))
         v-arr))
@@ -246,7 +246,7 @@
          (vb (aref (v-average-color v) 2)))
     (multiple-value-bind (vl va vb) (rgb-lab vr vg vb)
       (loop for point being the hash-keys of (v-points v) do
-           (multiple-value-bind (r g b) (pixel img (first point) (second point))
+           (multiple-value-bind (r g b) (pixel img (car point) (cdr point))
              (multiple-value-bind (l a b) (rgb-lab r g b)
                (inc-err-channel v vl l)
                (inc-err-channel v va a)
@@ -314,8 +314,8 @@
 
 (defun get-v-bounds (v)
   (let* ((points (hash-table-to-array (v-points v)))
-         (xs (map 'list #'second points))
-         (ys (map 'list #'first points))
+         (xs (map 'list #'car points))
+         (ys (map 'list #'cdr points))
          (mpi (min-index (lambda (p)
                            (the fixnum
                                 (- ;; Invert the order, so get arg-max, not arg-min
@@ -642,7 +642,7 @@
                         (setf (v-sum-color newv)
                               (make-array 3 :element-type 'fixnum :initial-contents '(0 0 0)))
                         (setf (v-points newv) (make-set (list))))
-                      (set-key (list i j) (v-points newv))
+                      (set-key (cons i j) (v-points newv))
                       ;;(setf (aref arr i j) mini)
                       )))
          (range miny maxy))))
@@ -677,8 +677,8 @@
          (vb (aref (v-average-color v) 2)))
     (multiple-value-bind (vl va vb) (rgb-lab vr vg vb)
       (loop for point being the hash-keys of (v-points v) do
-           (let ((y (first point))
-                 (x (second point)))
+           (let ((y (car point))
+                 (x (cdr point)))
              (let ((l (aref lab-img y x 0))
                    (a (aref lab-img y x 1))
                    (b (aref lab-img y x 2)))
@@ -821,7 +821,9 @@ POP-SIZE, using various functions"
     (loop repeat generations
        do
 		 (progn
-		   
+		   (print gen)
+           (when (= (mod gen 5) 0)
+             (sb-ext:gc :full t))
 		   (incf gen)
 		   (let ((moms (funcall selector (/ pop-size 2) ; choose which individuals reproduce
 								current-population
@@ -833,14 +835,13 @@ POP-SIZE, using various functions"
 				   (mapcan modifier moms dads)))
 		   (setf current-fitnesses ; recalculate fitnesses
 				 (pmap 'list evaluator current-population))
-           '	   (funcall printer current-population current-fitnesses)
-                   (let ((new-best
-                          (best-pair current-population current-fitnesses)))
-                     (if (or (not (cdr best))
-                             (> (cdr new-best) (cdr best)))
-                         (progn
-                           (setf best new-best)
-                           (setf greatest-generation gen))))))
+           (let ((new-best
+                  (best-pair current-population current-fitnesses)))
+             (if (or (not (cdr best))
+                     (> (cdr new-best) (cdr best)))
+                 (progn
+                   (setf best new-best)
+                   (setf greatest-generation gen))))))
     ;; write up the entire run
 	(format t "~%~%Best Result:~%")
     (format t "Greatest Generation: ~D~%" greatest-generation)
@@ -851,7 +852,7 @@ POP-SIZE, using various functions"
 (defun gen-runner ()
   (let* ((img (open-image "../tree.png"))
          (lab-img (make-lab-img img)))
-    (let ((voro (evolve 300 30 :setup (lambda ())
+    (let ((voro (evolve 600 30 :setup (lambda ())
                         :creator (lambda () (initialize-voronoi-points img 5000))
                         :selector #'tournament-selector
                         :modifier (lambda (mom dad) (modifier mom dad img))
@@ -861,7 +862,7 @@ POP-SIZE, using various functions"
 
 
 (defun voro-modifier (vo width height)
-  (when (random? 0.01)
+  (when (random? 0.03)
     (setf (v-x vo) (random width))
     (setf (v-y vo) (random height)))
   vo)
@@ -876,7 +877,7 @@ POP-SIZE, using various functions"
   (let ((c1 (copy-voro mom))
         (c2 (copy-voro dad)))
     (loop for i below (length mom) do
-         (when (random? 0.02)
+         (when (random? 0.05)
            (setf (aref c1 i) (aref dad i))
            (setf (aref c2 i) (aref mom i))))
     (vl-modifier c1 img)
