@@ -9,7 +9,7 @@
 (in-package :voronoi-pictures)
 
 
-(declaim (optimize (speed 3) (safety 3) (debug 3) (space 0) (compilation-speed 0)))
+(declaim (optimize (speed 3) (safety 0) (debug 0) (space 3) (compilation-speed 0)))
 
 (defparameter *num-additions* 5)
 (declaim (fixnum *num-additions*))
@@ -834,10 +834,10 @@ POP-SIZE, using various functions"
 
 ;; img lab-img
 (defun gen-runner ()
-  (let* ((img (open-image "../../../test.png"))
+  (let* ((img (open-image "../pres/leaf0.png"))
          (lab-img (make-lab-img img)))
     (evolve 3 20 :setup (lambda ())
-            :creator (lambda () (initialize-voronoi-points img 1000))
+            :creator (lambda () (initialize-voronoi-points img 5000))
             :selector #'tournament-selector
             :modifier (lambda (mom dad) (list mom dad))
             :evaluator (lambda (voro) (eval-voro voro img lab-img))
