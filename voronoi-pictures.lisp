@@ -647,40 +647,57 @@
 
 (defun eval-perf ()
   (let* ((img (open-image "../../../test.png"))
-         (voros (loop for i below 20 collecting
-                     (initialize-voronoi-points img 1000))))
+         (lab-img (make-lab-img img))
+         (voros (time (loop for i below 20 collecting
+                           (initialize-voronoi-points img 1000)))))
     (time (pmap 'list
                 (lambda (voro)
-                  (eval-voro voro img))
+                  (eval-voro voro img lab-img))
                 voros))))
 
-(defun calc-sum-error (v ref-arr img)
-  (declare (8-bit-rgb-image img))
+(defun calc-sum-error (v lab-img)
+  (declare ((simple-array single-float (* * 3)) lab-img))
   (let* ((vr (aref (v-average-color v) 0))
          (vg (aref (v-average-color v) 1))
          (vb (aref (v-average-color v) 2)))
     (multiple-value-bind (vl va vb) (rgb-lab vr vg vb)
       (loop for point being the hash-keys of (v-points v) do
-           (multiple-value-bind (r g b) (pixel img (first point) (second point))
-             (multiple-value-bind (l a b) (rgb-lab r g b)
+           (let ((y (first point))
+                 (x (second point)))
+             (let ((l (aref lab-img y x 0))
+                   (a (aref lab-img y x 1))
+                   (b (aref lab-img y x 2)))
                (inc-err-channel v vl l)
                (inc-err-channel v va a)
                (inc-err-channel v vb b)))))
     (v-sse v)))
 
-(defun calc-sum-errors (voro img)
+(defun make-lab-img (img)
+  (declare (8-bit-rgb-image img))
+  (with-image-bounds (height width) img
+    (let ((lab-img (make-array (list height width 3) :element-type 'single-float)))
+      (loop for i below height do
+           (loop for j below width do
+                (multiple-value-bind (r g b) (pixel img i j)
+                  (multiple-value-bind (l a b) (rgb-lab r g b)
+                    (setf (aref lab-img i j 0) l)
+                    (setf (aref lab-img i j 1) a)
+                    (setf (aref lab-img i j 2) b)))))
+      lab-img)))
+
+(defun calc-sum-errors (voro lab-img)
   (reduce #'+
           (pmap 'list (lambda (v)
                         (when (v-invalid v)
-                          (let ((e (calc-sum-error v nil img)))
+                          (let ((e (calc-sum-error v lab-img)))
                             (setf (v-invalid v) nil)
                             e)))
                 voro)
           :initial-value 0))
 
-(defun eval-voro (voro img)
+(defun eval-voro (voro img lab-img)
   (with-image-bounds (height width) img
     (voronoi-diagram voro 0 width 0 height))
   (voronoi-stat-collect voro img)
   (fix-averages voro)                                
-  (calc-sum-errors voro img))
+  (calc-sum-errors voro lab-img))
