@@ -9,7 +9,7 @@
 (in-package :voronoi-pictures)
 
 
-(declaim (optimize (speed 3) (safety 0) (debug 0) (space 3) (compilation-speed 0)))
+(declaim (optimize (speed 3) (safety 3) (debug 3) (space 3) (compilation-speed 0)))
 
 (defparameter *num-additions* 5)
 (declaim (fixnum *num-additions*))
@@ -19,14 +19,14 @@
   (loop for i from min below max collecting i))
 
 (defstruct v
-  (x 0 :type fixnum)
-  (y 0 :type fixnum)
+  (x 0 :type number)
+  (y 0 :type number)
   (points (make-set nil))
   (sum-color (make-array 3 :element-type 'fixnum :initial-contents '(0 0 0))
              :type (simple-array fixnum (3)))
   (average-color (make-array 3 :element-type '(unsigned-byte 8) :initial-contents '(0 0 0))
                  :type (simple-array (unsigned-byte 8) (3)))
-  (sse 0.0 :type single-float)
+  (sse 0.0 :type number)
   (invalid t))
 
 (defun copy-table (table)
@@ -125,9 +125,8 @@
 
 (defun dist-sq-v (x y v)
   (declare (fixnum x y))
-  (the fixnum
-       (+ (the fixnum (square (the fixnum (- (the fixnum (v-x v)) x))))
-          (the fixnum (square (the fixnum (- (the fixnum (v-y v)) y)))))))
+  (+ (square (- (v-x v) x))
+     (square (- (v-y v) y))))
 
 (defun nearest-voronoi (x y oldmini v-arr)
   (declare (fixnum x y oldmini) ((vector v) v-arr))
@@ -231,12 +230,12 @@
       image)))
 
 (defun fsquare (x)
-  (declare (single-float x))
+  (declare (number x))
   (* x x))
 
 (defmacro inc-err-channel (v refval val)
-  `(incf (v-sse ,v) (fsquare (the single-float (- (the single-float ,refval)
-                                                  (the single-float ,val))))))
+  `(incf (v-sse ,v) (fsquare (the number (- (the number ,refval)
+                                                  (the number ,val))))))
 
 
 (defun calc-error (v ref-arr img)
@@ -292,14 +291,14 @@
          (setf (aref vec i) key))
     vec))
 
-(defun split-cell (voro v)
+(defun split-cell (voro v &optional (num-additions *num-additions*))
   (let ((s (shuffle (hash-table-to-array (v-points v)))))
-    (loop for i below (min *num-additions* (length s)) do
+    (loop for i below (min num-additions (length s)) do
          (let ((p (aref s i)))
-           (when (not (and (= (v-x v) (the fixnum (second p)))
-                           (= (v-y v) (the fixnum (first p)))))
-             (vector-push-extend (make-v :x (second p)
-                                         :y (first p)) voro))))))
+           (when (not (and (= (v-x v) (car p))
+                           (= (v-y v) (cdr p))))
+             (vector-push-extend (make-v :x (cdr p)
+                                         :y (car p)) voro))))))
 
 (defun split-lowest-cell (voro)
   (let ((v (nth-value 1 (find-worst-cell voro))))
@@ -380,25 +379,25 @@
 
 (defparameter *ref_x*  95.047)
 (defparameter *inv_ref_x* (/ 1 *ref_x*))
-(declaim (type single-float *inv_ref_x*))
+(declaim (type number *inv_ref_x*))
 
 (defparameter *ref_y* 100.000)
 (defparameter *inv_ref_y* (/ 1 *ref_y*))
-(declaim (type single-float *inv_ref_y*))
+(declaim (type number *inv_ref_y*))
 
 (defparameter *ref_z* 108.883)
 (defparameter *inv_ref_z* (/ 1 *ref_z*))
-(declaim (type single-float *inv_ref_z*))
+(declaim (type number *inv_ref_z*))
 
 (defparameter *inv255* (/ 1 255.0))
-(declaim (type single-float *inv255*))
+(declaim (type number *inv255*))
 
 (defun rgb-xyz (r g b) 
   (declare (unsigned-byte r g b))
   (let ((vr (* r *inv255*))
         (vg (* g *inv255*))
         (vb (* b *inv255*)))
-    (declare (single-float vr vg vb))
+    (declare (number vr vg vb))
     (rgb-xyz-correct-channel vr)
     (rgb-xyz-correct-channel vg)
     (rgb-xyz-correct-channel vb)
@@ -417,9 +416,9 @@
 (defmacro xyz-rgb-correct-channel (chan)
   `(progn (setf ,chan
                 (round
-                 (the single-float
+                 (the number
                       (clip
-                       (the single-float
+                       (the number
                             (* 255.0 (if (> ,chan 0.0031308)
                                          (- (* 1.055 (expt ,chan (/ 2.4)))
                                             0.055)
@@ -428,11 +427,11 @@
                        255.0))))))
 
 (defun xyz-rgb (x y z)
-  (declare (single-float x y z))
+  (declare (number x y z))
   (let ((vr (* x 0.01))
         (vg (* y 0.01))
         (vb (* z 0.01)))
-    (declare (single-float vr vg vb))
+    (declare (number vr vg vb))
     (let ((vr (linear-combine 3.2406 -1.5372 -0.4986))
           (vg (linear-combine -0.9692 1.8758 0.0415))
           (vb (linear-combine 0.0557 -0.2040 1.0570)))
@@ -448,7 +447,7 @@
                    (+ (/ 16.0 116) (* ,chan 7.787)))))
 
 (defun xyz-lab (x y z)
-  (declare (single-float x y z))
+  (declare (number x y z))
   (let ((vx (* x *inv_ref_x*))
         (vy (* y *inv_ref_y*))
         (vz (* z *inv_ref_z*)))
@@ -498,7 +497,7 @@
        (let ((v (aref voro i)))
          (make-array '(3)
                      :initial-contents (list (v-x v) (v-y v) i) :adjustable nil
-                     :element-type 'fixnum :fill-pointer nil))))
+                     :element-type 'number :fill-pointer nil))))
 
 (defun sort-kd-voro (voro-kd)
   (let* ((x-a (copy-list voro-kd))
@@ -574,25 +573,25 @@
            (d (dist x y p))
            (val (* 1.0 (aref p axis))))
       (declare 
-       (single-float d)
-       (single-float val))
-      (when (< d (the single-float (first nearest-dist)))
+       (number d)
+       (number val))
+      (when (< d (the number (first nearest-dist)))
         (setf (first nearest) p)
         (setf (first nearest-dist) d))
       (if (= axis 0)
           (if (< x val)
               (progn (nearest-neighbor-helper (second kd-tree) x y 1 nearest nearest-dist)
-                     (when (> (+ (the single-float (first nearest-dist)) x) val)
+                     (when (> (+ (the number (first nearest-dist)) x) val)
                        (nearest-neighbor-helper (third kd-tree) x y 1 nearest nearest-dist)))
               (progn (nearest-neighbor-helper (third kd-tree) x y 1 nearest nearest-dist)
-                     (when (< (- x (the single-float (first nearest-dist))) val)
+                     (when (< (- x (the number (first nearest-dist))) val)
                        (nearest-neighbor-helper (second kd-tree) x y 1 nearest nearest-dist))))
           (if (< y val)
               (progn (nearest-neighbor-helper (second kd-tree) x y 0 nearest nearest-dist)
-                     (when (> (+ (the single-float (first nearest-dist)) y) val)
+                     (when (> (+ (the number (first nearest-dist)) y) val)
                        (nearest-neighbor-helper (third kd-tree) x y 0 nearest nearest-dist)))
               (progn (nearest-neighbor-helper (third kd-tree) x y 0 nearest nearest-dist)
-                     (when (< (- y (the single-float (first nearest-dist))) val)
+                     (when (< (- y (the number (first nearest-dist))) val)
                        (nearest-neighbor-helper (second kd-tree) x y 0 nearest nearest-dist))))))))
 
 (defun nearest-neighbor (kd-tree x y)
@@ -617,7 +616,7 @@
         (let ((out-img (make-picture ar nvoro img)))
           (write-image-file out-file out-img))))))
 
-(defun -main (&optional args)
+(defun -main-old (&optional args)
   (if (not (>= (length args) 4))
       (format t "Usage: ~a <input-file> <output-file> <number-of-iterations> [color-shift] ~%" (and args (first args)))
       (runner (pathname (second args))
@@ -626,6 +625,7 @@
               (if (fifth args)
                   (/ (parse-integer (fifth args)) 100.0)
                   0.0))))
+
 
 (defun voronoi-diagram (v-arr minx maxx miny maxy)
   (declare ((vector v) v-arr)
@@ -671,7 +671,7 @@
                 voros))))
 
 (defun calc-sum-error (v lab-img)
-  (declare ((simple-array single-float (* * 3)) lab-img))
+  (declare ((simple-array number (* * 3)) lab-img))
   (let* ((vr (aref (v-average-color v) 0))
          (vg (aref (v-average-color v) 1))
          (vb (aref (v-average-color v) 2)))
@@ -690,7 +690,7 @@
 (defun make-lab-img (img)
   (declare (8-bit-rgb-image img))
   (with-image-bounds (height width) img
-    (let ((lab-img (make-array (list height width 3) :element-type 'single-float)))
+    (let ((lab-img (make-array (list height width 3) :element-type 'number)))
       (loop for i below height do
            (loop for j below width do
                 (multiple-value-bind (r g b) (pixel img i j)
@@ -780,7 +780,7 @@ new slot is created).  EQUALP is the test used for duplicates."
 	(best-by #'cdr pairs)))
 
 (defun evolve (generations pop-size
-               &key setup creator selector modifier evaluator printer)
+               &key setup creator selector modifier evaluator printer writer)
   "Evolves for some number of GENERATIONS, creating a population of size
 POP-SIZE, using various functions"
   ;; The functions passed in are as follows:
@@ -821,7 +821,6 @@ POP-SIZE, using various functions"
     (loop repeat generations
        do
 		 (progn
-		   (print gen)
            (when (= (mod gen 5) 0)
              (sb-ext:gc :full t))
 		   (incf gen)
@@ -841,7 +840,12 @@ POP-SIZE, using various functions"
                      (> (cdr new-best) (cdr best)))
                  (progn
                    (setf best new-best)
-                   (setf greatest-generation gen))))))
+                   (setf greatest-generation gen)
+                   (format t "Current Generation: ~a~%" gen)
+                   (format t "  Current Best Fitness: ~a~%" (cdr best))
+                   (funcall writer (car best) gen)
+
+                   )))))
     ;; write up the entire run
 	(format t "~%~%Best Result:~%")
     (format t "Greatest Generation: ~D~%" greatest-generation)
@@ -850,28 +854,47 @@ POP-SIZE, using various functions"
 
 ;; img lab-img
 (defun gen-runner ()
-  (let* ((img (open-image "../tree.png"))
+  (let* ((img (open-image "tree.png"))
          (lab-img (make-lab-img img)))
-    (let ((voro (evolve 600 30 :setup (lambda ())
+    (let ((voro (evolve 20000 50 :setup (lambda ())
                         :creator (lambda () (initialize-voronoi-points img 5000))
                         :selector #'tournament-selector
                         :modifier (lambda (mom dad) (modifier mom dad img))
                         :evaluator (lambda (voro) (- (eval-voro voro img lab-img)))
-                        :printer (lambda (_ fits) (print (first fits))))))
+                        :printer (lambda (_ fits) (print (first fits)))
+                        :writer (lambda (voro gen)
+                                  (with-image-bounds (height width) img
+                                    (let ((arr (make-picture-array img)))
+                                      (voronoi-arr arr voro 0 width 0 height)
+                                      (let ((pic (make-picture arr voro img)))
+                                        (write-image-file (format nil "voroout/~12,'0d.png" gen)
+                                                          pic))))))))
       voro)))
 
 
 (defun voro-modifier (vo width height)
-  (when (random? 0.03)
-    (setf (v-x vo) (random width))
-    (setf (v-y vo) (random height)))
+  (if (random? 0.05)
+      (progn
+        (setf (v-x vo) (random width))
+        (setf (v-y vo) (random height)))
+      (progn
+        (setf (v-x vo) (+ (* 3 (gaussian-random))
+                          (v-x vo)))
+        (setf (v-y vo) (+ (* 3 (gaussian-random))
+                          (v-y vo)))))
   vo)
 
 (defun vl-modifier (voro img)
-  (with-image-bounds (height width) img
-    (if (random? 0.90)
-        (map 'vector (lambda (vo) (voro-modifier vo width height)) voro)
-        (initialize-voronoi-points img 5000))))
+  (if (random 0.02)
+      (initialize-voronoi-points img 5000)
+      (progn
+        (when (random? 0.5)
+          (let ((i (random (length voro))))
+            (swap (aref voro i) (aref voro (1- (length voro))))
+            (vector-pop voro)
+            (split-cell voro (aref voro (find-worst-cell voro)) 1)))
+        (with-image-bounds (height width) img
+          (map 'vector (lambda (vo) (voro-modifier vo width height)) voro)))))
 
 (defun modifier (mom dad img)
   (let ((c1 (copy-voro mom))
@@ -881,5 +904,27 @@ POP-SIZE, using various functions"
            (setf (aref c1 i) (aref dad i))
            (setf (aref c2 i) (aref mom i))))
     (vl-modifier c1 img)
+
     (vl-modifier c2 img)
     (list c1 c2)))
+
+(defun -main (&optional args)
+  (setf *random-state* (make-random-state t))
+  (setf lparallel:*kernel* (lparallel:make-kernel 20))
+  (let* ((voro (gen-runner))
+         (img (open-image "tree.png"))
+         (arr (make-picture-array img)))
+    (with-image-bounds (height width) img
+      (voronoi-arr arr voro 0 width 0 height))
+    (let ((pic (make-picture arr voro img)))
+      (write-image-file "out.png" pic))))
+
+
+(defun find-best-cell (voro)
+  (min-index (lambda (v) (v-sse v)) voro))
+
+(defmacro swap (a1 a2)
+  (let ((tmp (gensym)))
+    `(let ((,tmp ,a1))
+       (setf ,a1 ,a2)
+       (setf ,a2 ,tmp))))
