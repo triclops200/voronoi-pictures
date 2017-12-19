@@ -235,7 +235,7 @@
 
 (defmacro inc-err-channel (v refval val)
   `(incf (v-sse ,v) (fsquare (the number (- (the number ,refval)
-                                                  (the number ,val))))))
+                                            (the number ,val))))))
 
 
 (defun calc-error (v ref-arr img)
@@ -320,18 +320,18 @@
                                 (- ;; Invert the order, so get arg-max, not arg-min
                                  (+
                                   (square (the (signed-byte 32)
-                                               (- (v-x v) (the fixnum (second p)))))
+                                               (- (v-x v) (the fixnum (cdr p)))))
                                   (square (the (signed-byte 32)
-                                               (- (v-y v) (the fixnum (first p)))))))))
+                                               (- (v-y v) (the fixnum (car p)))))))))
                          points))
          (mp (aref points mpi))
          (d (+ 1
                (ceiling (isqrt (the (signed-byte 32)
                                     (+
                                      (square (the (signed-byte 32)
-                                                  (- (v-x v) (the fixnum (second mp)))))
+                                                  (- (v-x v) (the fixnum (cdr mp)))))
                                      (square (the (signed-byte 32)
-                                                  (- (v-y v) (the fixnum (first mp))))))))))))
+                                                  (- (v-y v) (the fixnum (car mp))))))))))))
     (declare (fixnum d))
     (values (- (minimum xs) d) (+ (maximum xs) d)
             (- (minimum ys) d) (+ (maximum ys) d))))
@@ -612,7 +612,7 @@
            (voro (initialize-voronoi-points img)))
       (multiple-value-bind (ar nvoro) (optimize-loop voro img iterations color-shift)
         (let ((lab-img (make-lab-img img)))
-          (print (eval-voro voro img lab-img)))
+          (print (eval-voro nvoro img lab-img)))
         (let ((out-img (make-picture ar nvoro img)))
           (write-image-file out-file out-img))))))
 
@@ -854,21 +854,22 @@ POP-SIZE, using various functions"
 
 ;; img lab-img
 (defun gen-runner ()
-  (let* ((img (open-image "tree.png"))
+  (let* ((img (open-image "../pres/leaf0.png"))
          (lab-img (make-lab-img img)))
-    (let ((voro (evolve 20000 50 :setup (lambda ())
+    (let ((voro (evolve 20 25 :setup (lambda ())
                         :creator (lambda () (initialize-voronoi-points img 5000))
                         :selector #'tournament-selector
                         :modifier (lambda (mom dad) (modifier mom dad img))
                         :evaluator (lambda (voro) (- (eval-voro voro img lab-img)))
                         :printer (lambda (_ fits) (print (first fits)))
                         :writer (lambda (voro gen)
-                                  (with-image-bounds (height width) img
-                                    (let ((arr (make-picture-array img)))
-                                      (voronoi-arr arr voro 0 width 0 height)
-                                      (let ((pic (make-picture arr voro img)))
-                                        (write-image-file (format nil "voroout/~12,'0d.png" gen)
-                                                          pic))))))))
+                                  (when nil
+                                    (with-image-bounds (height width) img
+                                      (let ((arr (make-picture-array img)))
+                                        (voronoi-arr arr voro 0 width 0 height)
+                                        (let ((pic (make-picture arr voro img)))
+                                          (write-image-file (format nil "voroout/~12,'0d.png" gen)
+                                                            pic)))))))))
       voro)))
 
 
@@ -910,9 +911,9 @@ POP-SIZE, using various functions"
 
 (defun -main (&optional args)
   (setf *random-state* (make-random-state t))
-  (setf lparallel:*kernel* (lparallel:make-kernel 20))
+  (setf lparallel:*kernel* (lparallel:make-kernel 8))
   (let* ((voro (gen-runner))
-         (img (open-image "tree.png"))
+         (img (open-image "../pres/leaf0.png"))
          (arr (make-picture-array img)))
     (with-image-bounds (height width) img
       (voronoi-arr arr voro 0 width 0 height))
